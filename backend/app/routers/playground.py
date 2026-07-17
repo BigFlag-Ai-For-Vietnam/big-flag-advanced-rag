@@ -9,7 +9,14 @@ from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.retrieval.mcp import client as retrieval_client
-from app.schemas.playground import Citation, QueryRequest, QueryResponse
+from app.schemas.playground import (
+    Citation,
+    McpRetrieveConfig,
+    McpRetrieveRequest,
+    McpRetrieveResponse,
+    QueryRequest,
+    QueryResponse,
+)
 from app.services import llm_client
 
 router = APIRouter(prefix="/api/playground", tags=["playground"])
@@ -44,7 +51,8 @@ async def query(req: QueryRequest):
 
     # Retrieval Engine chạy như service riêng — gọi đúng 1 lần qua MCP, không tự làm
     # thêm orchestration (embed/search) ở đây nữa.
-    citations = await retrieval_client.retrieve(req.question, req.top_k)
+    result = await retrieval_client.retrieve(req.question, req.top_k)
+    citations = result.citations
     messages = _build_messages(req.question, citations)
 
     if req.stream:
@@ -52,6 +60,27 @@ async def query(req: QueryRequest):
 
     answer = llm_client.chat(messages, temperature=0.2, max_tokens=1024, tag="qa")
     return QueryResponse(answer=answer, citations=citations)
+
+
+@router.post("/mcp-retrieve", response_model=McpRetrieveResponse)
+async def mcp_retrieve(req: McpRetrieveRequest):
+    """Debug/test riêng Retrieval Engine qua MCP — trả citation thô, KHÔNG sinh câu trả
+    lời. Dùng cho tab "MCP Playground" ở FE để quan sát ảnh hưởng của normalize/rewrite/
+    rerank (đổi RETRIEVAL_ENABLE_* trong .env rồi gọi lại là thấy khác biệt)."""
+    result = await retrieval_client.retrieve(req.question, req.top_k)
+    config = McpRetrieveConfig(
+        normalize=settings.retrieval_enable_normalize,
+        rewrite=settings.retrieval_enable_rewrite,
+        rerank=settings.retrieval_enable_rerank,
+        agent_max_steps=settings.retrieval_agent_max_steps,
+    )
+    return McpRetrieveResponse(
+        citations=result.citations,
+        normalized_question=result.normalized_question,
+        rewritten_question=result.rewritten_question,
+        tool_calls=result.tool_calls,
+        config=config,
+    )
 
 
 def _stream_answer(messages: list[dict], citations: list[Citation]):

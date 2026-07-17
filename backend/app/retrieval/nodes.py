@@ -14,7 +14,7 @@ import json
 import logging
 import re
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from app.config import settings
 from app.schemas.playground import Citation
@@ -68,6 +68,28 @@ def _parse_tool_message(msg: ToolMessage) -> list[dict]:
     except json.JSONDecodeError:
         return []
     return data if isinstance(data, list) else []
+
+
+def build_trace(messages: list) -> list[dict]:
+    """Trace các lần react subgraph gọi tool: tool name, args, số hit trả về.
+
+    Ghép AIMessage.tool_calls (tool nào, args gì) với ToolMessage tương ứng (theo
+    tool_call_id) để biết mỗi lần gọi trả về bao nhiêu hit — phục vụ debug UI (MCP
+    Playground) chứ không dùng để tính citations (đó là việc của rerank()).
+    """
+    tool_call_meta: dict[str, dict] = {}
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            for tc in msg.tool_calls or []:
+                tool_call_meta[tc["id"]] = {"tool": tc["name"], "args": tc["args"]}
+
+    trace: list[dict] = []
+    for msg in messages:
+        if isinstance(msg, ToolMessage) and msg.tool_call_id in tool_call_meta:
+            meta = tool_call_meta[msg.tool_call_id]
+            hits = _parse_tool_message(msg)
+            trace.append({"tool": meta["tool"], "args": meta["args"], "hit_count": len(hits)})
+    return trace
 
 
 def rerank(messages: list, top_k: int) -> list[Citation]:

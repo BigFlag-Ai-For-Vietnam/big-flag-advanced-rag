@@ -119,7 +119,16 @@ def _get_engine():
     return _engine
 
 
-def retrieve(question: str, top_k: int = 5) -> list[Citation]:
-    """Chạy outer graph: normalize -> rewrite -> react (vector/graph tools) -> rerank."""
+def retrieve(question: str, top_k: int = 5) -> dict:
+    """Chạy outer graph: normalize -> rewrite -> react (vector/graph tools) -> rerank.
+
+    Trả về cả citations lẫn trace (câu hỏi đã normalize/rewrite, danh sách tool đã gọi
+    kèm số hit) — caller (MCP tool) quyết định lộ ra bao nhiêu cho từng loại client.
+    """
     result = _get_engine().invoke({"question": question, "top_k": top_k, "messages": []})
-    return result["citations"]
+    return {
+        "citations": result["citations"],
+        "normalized_question": result["normalized_question"],
+        "rewritten_question": result["rewritten_question"],
+        "tool_calls": nodes.build_trace(result["messages"]),
+    }

@@ -91,3 +91,31 @@ def test_rerank_disabled_skips_sort_but_still_dedupes(monkeypatch):
 def test_rerank_ignores_non_tool_messages():
     messages = [HumanMessage(content="hi"), AIMessage(content="ok")]
     assert nodes.rerank(messages, top_k=5) == []
+
+
+def test_build_trace_pairs_tool_calls_with_results():
+    from langchain_core.messages.tool import ToolCall
+
+    messages = [
+        HumanMessage(content="câu hỏi"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                ToolCall(name="query_vector_store", args={"query": "a", "top_k": 5}, id="tc1", type="tool_call"),
+                ToolCall(name="query_graph_knowledge", args={"query": "a"}, id="tc2", type="tool_call"),
+            ],
+        ),
+        ToolMessage(content=json.dumps([{"chunk_id": "c1"}, {"chunk_id": "c2"}]), tool_call_id="tc1"),
+        ToolMessage(content=json.dumps([]), tool_call_id="tc2"),
+    ]
+
+    trace = nodes.build_trace(messages)
+
+    assert trace == [
+        {"tool": "query_vector_store", "args": {"query": "a", "top_k": 5}, "hit_count": 2},
+        {"tool": "query_graph_knowledge", "args": {"query": "a"}, "hit_count": 0},
+    ]
+
+
+def test_build_trace_empty_without_tool_calls():
+    assert nodes.build_trace([HumanMessage(content="hi"), AIMessage(content="ok")]) == []

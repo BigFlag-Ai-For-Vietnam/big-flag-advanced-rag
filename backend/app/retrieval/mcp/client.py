@@ -13,7 +13,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.config import settings
-from app.schemas.playground import Citation
+from app.schemas.playground import Citation, RetrieveResult
 
 logger = logging.getLogger("retrieval.mcp.client")
 
@@ -40,12 +40,18 @@ async def close() -> None:
     _session = None
 
 
-async def retrieve(question: str, top_k: int = 5) -> list[Citation]:
-    """Gọi đúng 1 lần tool `retrieve` của Retrieval Engine, trả về citations."""
+async def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
+    """Gọi đúng 1 lần tool `retrieve` của Retrieval Engine — trả về citations + trace
+    (normalized/rewritten question, tool đã gọi kèm hit_count)."""
     if _session is None:
         raise RuntimeError("MCP client chưa kết nối — connect() phải chạy ở FastAPI startup trước.")
     result = await _session.call_tool("retrieve", {"question": question, "top_k": top_k})
     if result.isError:
         raise RuntimeError(f"Retrieval Engine trả lỗi: {result.content}")
-    citations_raw = (result.structuredContent or {}).get("result", [])
-    return [Citation(**c) for c in citations_raw]
+    data = result.structuredContent or {}
+    return RetrieveResult(
+        citations=[Citation(**c) for c in data.get("citations", [])],
+        normalized_question=data.get("normalized_question", ""),
+        rewritten_question=data.get("rewritten_question", ""),
+        tool_calls=data.get("tool_calls", []),
+    )

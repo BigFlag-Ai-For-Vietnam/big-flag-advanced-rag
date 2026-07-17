@@ -12,6 +12,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 from app.retrieval import engine
+from app.schemas.playground import RetrieveResult
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("retrieval.mcp.server")
@@ -20,16 +21,29 @@ mcp = FastMCP("retrieval-engine", host="0.0.0.0", port=8100)
 
 
 @mcp.tool()
-def retrieve(question: str, top_k: int = 5) -> list[dict]:
+def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
     """Tìm các đoạn tài liệu liên quan nhất tới câu hỏi (điều khoản, quyền lợi, phí, sản
-    phẩm/dịch vụ ngân hàng đã index). Trả về danh sách citation (document_id, title,
-    chunk_index, score, final_content) — KHÔNG sinh câu trả lời; caller tự dùng citation
-    này để trả lời câu hỏi.
+    phẩm/dịch vụ ngân hàng đã index). KHÔNG sinh câu trả lời; caller tự dùng citation
+    để trả lời câu hỏi.
+
+    Trả về:
+    - citations: danh sách (document_id, title, chunk_index, score, final_content)
+    - normalized_question / rewritten_question: câu hỏi sau từng bước xử lý
+    - tool_calls: danh sách tool đã gọi trong lúc retrieval (tool, args, hit_count)
+      — phục vụ debug/quan sát pipeline, không ảnh hưởng tới việc dùng citations.
+
+    Trả về Pydantic model (không phải dict trần) để FastMCP sinh được outputSchema —
+    dict trần khiến SDK không tạo structuredContent, chỉ trả text JSON trong content.
     """
     logger.info("[mcp.retrieve] question=%r top_k=%s", question, top_k)
-    citations = engine.retrieve(question, top_k)
-    logger.info("[mcp.retrieve] trả về %s citation(s)", len(citations))
-    return [c.model_dump() for c in citations]
+    result = engine.retrieve(question, top_k)
+    logger.info("[mcp.retrieve] trả về %s citation(s)", len(result["citations"]))
+    return RetrieveResult(
+        citations=result["citations"],
+        normalized_question=result["normalized_question"],
+        rewritten_question=result["rewritten_question"],
+        tool_calls=result["tool_calls"],
+    )
 
 
 if __name__ == "__main__":

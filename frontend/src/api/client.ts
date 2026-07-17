@@ -33,6 +33,19 @@ export interface Citation {
   document_id: string; title: string; chunk_index: number;
   score: number; final_content: string;
 }
+export interface McpRetrieveConfig {
+  normalize: boolean; rewrite: boolean; rerank: boolean; agent_max_steps: number;
+}
+export interface ToolCallTrace {
+  tool: string; args: Record<string, unknown>; hit_count: number;
+}
+export interface McpRetrieveResponse {
+  citations: Citation[];
+  normalized_question: string;
+  rewritten_question: string;
+  tool_calls: ToolCallTrace[];
+  config: McpRetrieveConfig;
+}
 
 export async function uploadDocument(file: File): Promise<DocumentSummary> {
   const form = new FormData();
@@ -62,6 +75,11 @@ export async function deleteDocument(id: string): Promise<void> {
 
 export async function reprocessDocument(id: string): Promise<void> {
   await api.post(`/api/documents/${id}/reprocess`);
+}
+
+export async function mcpRetrieve(question: string, top_k: number): Promise<McpRetrieveResponse> {
+  const { data } = await api.post("/api/playground/mcp-retrieve", { question, top_k });
+  return data;
 }
 
 export async function getHealth(): Promise<boolean> {
