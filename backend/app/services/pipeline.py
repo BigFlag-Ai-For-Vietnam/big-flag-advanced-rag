@@ -1,0 +1,136 @@
+"""Orchestrate pipeline A -> B -> C, cập nhật status document, xử lý lỗi.
+
+Chạy nền bằng FastAPI BackgroundTasks (v1). Hướng nâng cấp v2: Celery.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import uuid
+
+from app.config import settings
+from app.db import SessionLocal
+from app.models import Chunk, Document, DocumentStatus, Page
+from app.services import chunking_service, embedding_service, parsing_service, qdrant_service
+
+logger = logging.getLogger("pipeline")
+
+
+def _set_status(db, document: Document, status: DocumentStatus, error: str | None = None) -> None:
+    document.status = status
+    if error is not None:
+        document.error_message = error
+    db.commit()
+
+
+def run_pipeline(document_id: str) -> None:
+    """Điểm vào cho BackgroundTasks. Tự mở session riêng (khác request session)."""
+    db = SessionLocal()
+    try:
+        document = db.get(Document, document_id)
+        if document is None:
+            logger.error("Không tìm thấy document %s", document_id)
+            return
+
+        # Chạy lại: dọn dữ liệu cũ (pages/chunks + Qdrant points).
+        _reset_document(db, document)
+
+        # --- A. Parsing ---
+        _set_status(db, document, DocumentStatus.parsing)
+        image_dir = os.path.join(settings.data_dir, "images", document.id)
+        pages = parsing_service.parse_pdf(document.file_path, image_dir=image_dir)
+        for p in pages:
+            db.add(
+                Page(
+                    document_id=document.id,
+                    page_number=p["page_number"],
+                    parsed_text=p["parsed_text"],
+                    image_ref=p["image_ref"],
+                )
+            )
+        document.page_count = len(pages)
+        full_text = parsing_service.join_pages(pages)
+        _set_status(db, document, DocumentStatus.parsed)
+
+        # Guard: nếu parse ra quá ít nội dung so với số trang -> nhiều khả năng VLM không
+        # đọc được ảnh (model không hỗ trợ vision). Fail loud với thông báo hành động được.
+        non_empty_pages = sum(1 for p in pages if (p.get("parsed_text") or "").strip())
+        if not full_text.strip() or (len(pages) > 0 and non_empty_pages == 0):
+            raise RuntimeError(
+                "VLM parse rỗng cho tất cả trang. Kiểm tra FPT_VLM_MODEL có phải model "
+                "VISION (hỗ trợ image_url) không — model chat/agentic thuần (vd GLM-5.x) "
+                "sẽ bỏ qua ảnh và trả rỗng. Hoặc bật PARSE_TEXT_FALLBACK=true để dùng "
+                "text-layer PDF."
+            )
+        used_fallback = sum(1 for p in pages if p.get("used_fallback"))
+        if used_fallback:
+            logger.warning(
+                "%s/%s trang dùng text-layer fallback (VLM trả rỗng) — cân nhắc đổi "
+                "FPT_VLM_MODEL sang model vision.",
+                used_fallback,
+                len(pages),
+            )
+
+        # --- B. Chunking + Contextual ---
+        _set_status(db, document, DocumentStatus.chunking)
+        chunk_dicts = chunking_service.build_chunks(document.title, full_text)
+        chunk_rows: list[Chunk] = []
+        for cd in chunk_dicts:
+            row = Chunk(
+                document_id=document.id,
+                chunk_index=cd["chunk_index"],
+                raw_text=cd["raw_text"],
+                contextual_prefix=cd["contextual_prefix"],
+                final_content=cd["final_content"],
+                qdrant_point_id=str(uuid.uuid4()),
+                token_count=len(cd["final_content"].split()),
+            )
+            db.add(row)
+            chunk_rows.append(row)
+        db.commit()
+
+        # --- C. Indexing ---
+        _set_status(db, document, DocumentStatus.indexing)
+        qdrant_service.ensure_collection()
+        vectors = embedding_service.embed_texts([r.final_content for r in chunk_rows])
+        points = [
+            {
+                "id": row.qdrant_point_id,
+                "vector": vec,
+                "payload": {
+                    "document_id": document.id,
+                    "chunk_id": row.id,
+                    "chunk_index": row.chunk_index,
+                    "title": document.title,
+                    "final_content": row.final_content,
+                },
+            }
+            for row, vec in zip(chunk_rows, vectors)
+        ]
+        qdrant_service.upsert_chunks(points)
+
+        _set_status(db, document, DocumentStatus.indexed)
+        logger.info("Pipeline xong cho document %s (%s chunks)", document.id, len(chunk_rows))
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Pipeline lỗi cho document %s", document_id)
+        try:
+            document = db.get(Document, document_id)
+            if document is not None:
+                _set_status(db, document, DocumentStatus.failed, error=str(exc)[:2000])
+        except Exception:  # noqa: BLE001
+            db.rollback()
+    finally:
+        db.close()
+
+
+def _reset_document(db, document: Document) -> None:
+    """Xoá pages/chunks cũ + Qdrant points để reprocess sạch."""
+    if document.status == DocumentStatus.uploaded and not document.pages and not document.chunks:
+        return
+    qdrant_service.delete_by_document(document.id)
+    db.query(Page).filter(Page.document_id == document.id).delete()
+    db.query(Chunk).filter(Chunk.document_id == document.id).delete()
+    document.error_message = None
+    document.page_count = None
+    db.commit()

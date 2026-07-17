@@ -1,0 +1,23 @@
+# env & secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# data & storage
+data/
+backend/data/
+*.db
+
+# node / vite
+node_modules/
+dist/
+.vite/
+
+# os
+.DS_Store
+Thumbs.db

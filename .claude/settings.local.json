@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "PowerShell(\"---\")",
+      "PowerShell(\"---node---\")",
+      "PowerShell(\"---npm---\")",
+      "PowerShell(\"---docker---\")",
+      "WebSearch"
+    ]
+  }
+}
