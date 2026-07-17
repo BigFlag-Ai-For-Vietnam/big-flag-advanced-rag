@@ -16,55 +16,54 @@ cp .env.example .env
 docker compose up --build
 # Qdrant dashboard: :6333/dashboard | Backend Swagger: :8000/docs | Frontend: :5173
 
-# Backend local (needs .env in backend/ or exported env vars)
-cd backend && pip install -r requirements.txt
-uvicorn app.main:app --reload
-
-# Backend tests (no external API calls — pure unit tests)
-cd backend && pytest
-cd backend && pytest tests/test_chunking.py::test_split_text -v   # single test
+# Backend local
+cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
+cd backend && pytest                                              # offline unit tests
 
 # Frontend local
 cd frontend && npm install && npm run dev
 cd frontend && npm run build   # tsc -b && vite build (also the typecheck)
+
+# Infra stack (MLflow + RustFS + Postgres) — separate compose
+cd infra && cp .env.example .env && docker compose up --build
 ```
 
-## Configuration is load-bearing — read before touching model calls
+## Project structure
 
-Model IDs and vector dimension are **never hardcoded**; everything comes from `.env` via `app/config.py` (`pydantic-settings`). Two settings break the pipeline silently if wrong:
+```
+backend/app/
+  config.py            pydantic-settings — all model IDs + EMBED_DIM from .env (never hardcoded)
+  db.py                SQLite engine, create_all on startup (no migrations)
+  main.py              FastAPI app
+  models/              SQLAlchemy: document, page, chunk
+  schemas/             Pydantic request/response
+  routers/             /api endpoints: documents, playground
+  services/
+    pipeline.py        background orchestrator (uploaded → parsed → chunking → indexing → indexed)
+    parsing_service.py PDF page → PNG → VLM
+    chunking_service.py SentenceSplitter + LLM contextual prefix
+    embedding_service.py + qdrant_service.py  embed + upsert/search
+    llm_client.py      single choke point for all FPT calls (chat/stream/vision/embed)
+frontend/src/
+  api/client.ts        backend client
+  pages/               Upload, Documents, Playground
+infra/                 MLflow + RustFS + Postgres compose (independent of app)
+```
 
-- **`EMBED_DIM`** must exactly match the embedding model's output dimension, or Qdrant upsert fails (the collection is created once with this size; changing it later requires recreating the collection).
-- **`FPT_VLM_MODEL`** must be a genuine **vision** model (accepts `image_url`). A chat-only model (e.g. plain GLM-5.x) silently ignores the page image and returns empty text. The pipeline guards against this: if all pages parse empty it raises a loud, actionable error. `PARSE_TEXT_FALLBACK=true` falls back to the PDF text layer per-page when the VLM returns empty.
-- **`FPT_ENABLE_PROMPT_CACHE`** — keep `false`; FPT hasn't confirmed `cache_control` support. `llm_client.chat()` attaches Anthropic-style `cache_control` when enabled and auto-retries without it if the server rejects the field.
+## Load-bearing config (read before touching model calls)
 
-## Architecture
+Model IDs and vector dimension come from `.env` via `config.py`. Two settings break the pipeline silently if wrong:
 
-### Two-store design (important invariant)
-- **SQLite** holds all raw text: documents, per-page `parsed_text`, and per-chunk `raw_text` / `contextual_prefix` / `final_content`.
-- **Qdrant** holds only vectors + a *small* payload (`document_id, chunk_id, chunk_index, title, final_content`). Never move bulk raw text into Qdrant payloads. `document_id` is a keyword payload index used for filtered delete.
+- **`EMBED_DIM`** must match the embedding model's output dimension, or Qdrant upsert fails (collection is created once at this size; changing it later means recreating the collection).
+- **`FPT_VLM_MODEL`** must be a genuine **vision** model (accepts `image_url`); a chat-only model silently returns empty text. `PARSE_TEXT_FALLBACK=true` falls back to the PDF text layer when the VLM returns empty.
+- **`FPT_ENABLE_PROMPT_CACHE`** — keep `false`; FPT hasn't confirmed `cache_control` support.
 
-### The pipeline (`services/pipeline.py`)
-Runs in the background via FastAPI `BackgroundTasks` (opens its own DB session, separate from the request session). Drives the document through the `DocumentStatus` enum: `uploaded → parsing → parsed → chunking → indexing → indexed` (or `failed` with `error_message`). The three stages:
+## Key invariants
 
-- **A. Parsing (`parsing_service.py`)** — each PDF page rendered to PNG via `pdfplumber`, sent to the VLM (`ThreadPoolExecutor`, `VLM_MAX_CONCURRENCY`), with per-page retry (`tenacity`) and code-fence stripping. Empty VLM output falls back to the PDF text layer if enabled.
-- **B. Chunking + Contextual (`chunking_service.py`)** — `SentenceSplitter` (llama-index) splits by `CHUNK_SIZE`/`CHUNK_OVERLAP`. For each chunk, the LLM generates a locating "contextual prefix" using the *full document* as a cacheable message prefix. `final_content = title + prefix + "\n\n" + raw_text` — this is what gets embedded. A single chunk's context failure is logged and skipped, not fatal.
-- **C. Indexing (`qdrant_service.py` + `embedding_service.py`)** — batch-embed all `final_content`, upsert to Qdrant with `qdrant_point_id` (a UUID stored on the Chunk row).
-
-Reprocess (`_reset_document`) wipes old pages/chunks + Qdrant points before re-running so the pipeline is idempotent.
-
-### LLM boundary (`services/llm_client.py`)
-The single choke point for all FPT calls: `chat` / `chat_stream` / `vision` / `embed`. All construct an `OpenAI` client pointed at `settings.fpt_base_url`. Errors wrap into `LLMError`; token usage (including cached tokens) is logged per call. Add new model interactions here rather than calling `openai` directly elsewhere.
-
-### API (`routers/`, prefix `/api`)
-- `documents.py` — upload (writes PDF to `DATA_DIR/uploads`, triggers pipeline), list (paginated), detail (pages + chunks), status (for polling), reprocess, delete (Qdrant points → PDF file → DB cascade).
-- `playground.py` — `/api/playground/query`: embed question → Qdrant `top_k` search → build grounded prompt → LLM answer. `stream: true` returns SSE (`type: citations` first, then `type: token` deltas, then `[DONE]`).
-
-### DB notes (`db.py`)
-- SQLite uses `check_same_thread=False` (background threads share the engine) and a `connect` event turns on `PRAGMA foreign_keys=ON` so the `cascade="all, delete-orphan"` relationships (Document → Pages/Chunks) actually cascade.
-- Schema is created with `Base.metadata.create_all` on startup (no migrations). Changing a model requires deleting the SQLite file or adding Alembic. In Docker the DB lives in the `backend_data` volume at `/data/rag.db`.
-
-## Testing conventions
-Tests (`backend/tests/`) are pure unit tests over `chunking_service` (`split_text`, `build_final_content`) — no network, no DB. Keep new tests offline; the FPT-dependent paths aren't covered by automated tests.
+- **Two-store design**: SQLite holds all raw text (documents, per-page/-chunk text). Qdrant holds only vectors + a *small* payload (`document_id, chunk_id, chunk_index, title, final_content`). Never move bulk raw text into Qdrant. `document_id` is a keyword index for filtered delete.
+- **Pipeline** runs in the background via `BackgroundTasks` (own DB session); reprocess wipes old pages/chunks + Qdrant points first, so it's idempotent.
+- **LLM boundary**: add new model interactions in `llm_client.py`, not by calling `openai` directly elsewhere.
+- **Tests** (`backend/tests/`) are pure offline unit tests over `chunking_service`; keep new tests offline (FPT-dependent paths aren't covered).
 
 ## Known v1 shortcuts (per README)
 `BackgroundTasks` instead of Celery; `create_all` instead of Alembic; CORS `allow_origins=["*"]`; Vite dev server instead of a static nginx build. Don't treat these as bugs unless the task is specifically to harden them.

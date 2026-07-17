@@ -1,0 +1,98 @@
+# Infra stack: MLflow tracking + RustFS (S3-compatible artifact store) + Postgres (backend store)
+# Usage:
+#   cd infra && cp .env.example .env   # điền secrets
+#   docker compose up --build
+#
+# MLflow UI:        http://localhost:5000
+# RustFS S3 API:    http://localhost:9000
+# RustFS Console:   http://localhost:9001
+# Postgres:         localhost:5432
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlflow} -d ${POSTGRES_DB:-mlflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    ports:
+      - "${RUSTFS_API_PORT:-9000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      RUSTFS_OBS_LOGGER_LEVEL: info
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # One-shot: tạo bucket cho MLflow artifacts rồi thoát.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set rustfs http://rustfs:9000 ${RUSTFS_ACCESS_KEY:-rustfsadmin} ${RUSTFS_SECRET_KEY:-rustfsadmin};
+      mc mb --ignore-existing rustfs/${MLFLOW_BUCKET:-mlflow};
+      echo 'Bucket ${MLFLOW_BUCKET:-mlflow} ready';
+      exit 0;
+      "
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: mlflow.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    environment:
+      # MLflow dùng các biến AWS_* + endpoint để nói chuyện với RustFS qua S3 protocol.
+      MLFLOW_S3_ENDPOINT_URL: http://rustfs:9000
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      # boto3 cần region dù RustFS bỏ qua; đặt để tránh warning.
+      AWS_DEFAULT_REGION: us-east-1
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
+      --artifacts-destination s3://${MLFLOW_BUCKET:-mlflow}
+      --serve-artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  rustfs_data:
