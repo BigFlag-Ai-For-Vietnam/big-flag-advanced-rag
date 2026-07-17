@@ -9,7 +9,8 @@ pillow==11.1.0
 qdrant-client==1.12.2
 boto3==1.35.71
 llama-index-core==0.12.10
-openai==1.59.6
+openai==1.87.0
 httpx==0.28.1
 tenacity==9.0.0
 pytest==8.3.4
+mlflow-skinny==3.14.0

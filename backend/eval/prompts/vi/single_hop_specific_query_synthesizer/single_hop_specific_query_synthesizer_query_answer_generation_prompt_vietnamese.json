@@ -1,0 +1,25 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 332819068067837718,
+  "language": "vietnamese",
+  "instruction": "Generate a single-hop query and answer based on the specified conditions (persona, term, style, length) and the provided context. Ensure the answer is entirely faithful to the context, using only the information directly from the provided context.### Instructions:\n1. **Generate a Query**: Based on the context, persona, term, style, and length, create a question that aligns with the persona's perspective and incorporates the term.\n2. **Generate an Answer**: Using only the content from the provided context, construct a detailed answer to the query. Do not add any information not included in or inferable from the context.\n3. **Additional Context** (if provided): If llm_context is provided, use it as guidance for what type of question to generate (e.g., comparison questions, how-to questions, application-based questions) and how to structure the answer accordingly. Still ensure the content comes only from the provided context.\n",
+  "examples": [
+    {
+      "input": {
+        "persona": {
+          "name": "Kỹ sư Phần mềm",
+          "role_description": "Tập trung vào các phương pháp lập trình tốt nhất và thiết kế hệ thống."
+        },
+        "term": "vi dịch vụ",
+        "query_style": "Trang trọng",
+        "query_length": "Trung bình",
+        "context": "Vi dịch vụ là một kiểu kiến trúc trong đó các ứng dụng được cấu trúc như một tập hợp các dịch vụ liên kết lỏng lẻo. Mỗi dịch vụ có mức độ chi tiết cao và tập trung vào một chức năng duy nhất.",
+        "llm_context": null
+      },
+      "output": {
+        "query": "Mục đích của vi dịch vụ trong kiến trúc phần mềm là gì?",
+        "answer": "Vi dịch vụ được thiết kế để cấu trúc các ứng dụng như một tập hợp các dịch vụ liên kết lỏng lẻo, mỗi dịch vụ tập trung vào một chức năng duy nhất."
+      }
+    }
+  ]
+}

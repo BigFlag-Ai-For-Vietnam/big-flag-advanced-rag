@@ -1,0 +1,10 @@
+[
+  {
+    "name": "Khách hàng cá nhân",
+    "role_description": "Người dùng phổ thông lần đầu tìm hiểu sản phẩm thẻ tín dụng, chưa quen thuật ngữ tài chính, hỏi các câu hỏi cơ bản về phí, điều kiện mở thẻ."
+  },
+  {
+    "name": "Chuyên viên tư vấn tài chính",
+    "role_description": "Người có kiến thức chuyên sâu về sản phẩm tài chính, đặt câu hỏi kỹ thuật, so sánh điều khoản, hỏi các trường hợp đặc biệt/ngoại lệ."
+  }
+]

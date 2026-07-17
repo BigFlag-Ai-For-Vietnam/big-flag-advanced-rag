@@ -32,13 +32,13 @@ infra/.env:
 	cp infra/.env.example infra/.env
 	@echo ">> created infra/.env"
 
-# ── App stack (Qdrant + backend + frontend) ─────────────────────────────────
+# ── App stack (backend + frontend; needs infra up for Qdrant + network) ─────
 .PHONY: up
-up: .env ## Build & start the full app stack (Qdrant + backend + frontend)
+up: .env infra-up-d ## Build & start everything (infra detached, then backend + frontend)
 	$(COMPOSE) up --build
 
 .PHONY: up-d
-up-d: .env ## Start the app stack in the background
+up-d: .env infra-up-d ## Start everything in the background
 	$(COMPOSE) up --build -d
 
 .PHONY: down
@@ -53,9 +53,9 @@ logs: ## Tail app stack logs
 ps: ## Show app stack container status
 	$(COMPOSE) ps
 
-# ── Infra stack (MLflow + RustFS + Postgres) ────────────────────────────────
+# ── Infra stack (Qdrant + MLflow + RustFS + Postgres) ───────────────────────
 .PHONY: infra-up
-infra-up: infra/.env ## Build & start the infra stack (MLflow + RustFS + Postgres)
+infra-up: infra/.env ## Build & start the infra stack (Qdrant + MLflow + RustFS + Postgres)
 	$(INFRA_COMPOSE) up --build
 
 .PHONY: infra-up-d

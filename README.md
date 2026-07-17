@@ -80,17 +80,21 @@ Sao chép `.env.example` → `.env` và điền:
 
 ## Chạy bằng Docker (khuyến nghị)
 ```bash
-cp .env.example .env      # rồi điền FPT_API_KEY + model IDs
-docker compose up --build
+make env    # tạo .env + infra/.env — rồi điền FPT_API_KEY + model IDs vào .env
+make up     # up infra (Qdrant + MLflow + RustFS + Postgres) detached, rồi backend + frontend
 ```
+(tương đương: `cd infra && docker compose up -d --build` trước, rồi `docker compose up --build`
+ở gốc repo — backend nối vào network `rag-infra` của stack infra để gọi Qdrant/MLflow.)
+
 - Qdrant: http://localhost:6333/dashboard
 - Backend (Swagger): http://localhost:8000/docs
 - Frontend: http://localhost:5173
+- MLflow: http://localhost:5000
 
 ## Chạy local (không Docker)
 ```bash
-# Qdrant
-docker run -p 6333:6333 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant
+# Qdrant (nằm trong stack infra/)
+cd infra && cp .env.example .env && docker compose up -d qdrant
 
 # Backend
 cd backend && pip install -r requirements.txt
@@ -121,11 +125,13 @@ choke point duy nhất, chọn backend bằng `STORAGE_BACKEND`:
 không phải path tuyệt đối — `storage_service` phân giải theo backend. Cần `boto3` (đã có
 trong `requirements.txt`) khi dùng `s3`.
 
-> RustFS chạy trong stack `infra/` (mặc định tách mạng với app compose). Dùng `s3` cần cho
-> backend truy cập được endpoint đó (chung Docker network hoặc endpoint ngoài).
+> RustFS chạy trong stack `infra/`. Backend container đã nối sẵn vào network `rag-infra`
+> của stack đó nên chỉ cần đặt `S3_ENDPOINT_URL=http://rustfs:9000`; backend chạy local
+> trên host dùng `http://localhost:9000`.
 
-## Infra stack (MLflow + RustFS + Postgres)
-Stack quan sát/thí nghiệm **độc lập** với app, nằm ở `infra/` (compose riêng):
+## Infra stack (Qdrant + MLflow + RustFS + Postgres)
+Toàn bộ hạ tầng nằm ở `infra/` (compose riêng, network `rag-infra` attachable —
+backend app nối vào để gọi service theo tên). Chạy **trước** app stack:
 
 ```bash
 cd infra && cp .env.example .env && docker compose up --build
@@ -133,11 +139,13 @@ cd infra && cp .env.example .env && docker compose up --build
 
 | Service        | URL                     | Ghi chú                          |
 | -------------- | ----------------------- | -------------------------------- |
+| Qdrant         | http://localhost:6333   | vector DB (dashboard: `/dashboard`) |
 | MLflow UI      | http://localhost:5000   | tracking + artifact serving      |
 | RustFS Console | http://localhost:9001   | login bằng RUSTFS_ACCESS/SECRET  |
 | RustFS S3 API  | http://localhost:9000   | endpoint S3-compatible           |
 | Postgres       | localhost:5432          | MLflow backend store (db `mlflow`) |
 
+- **Qdrant** là vector DB của app; backend container gọi `http://qdrant:6333` qua network chung.
 - **MLflow** dùng Postgres làm backend store và RustFS làm artifact store (`--serve-artifacts`).
 - **RustFS** là object storage S3-compatible; ngoài MLflow, app có thể tái dùng cho blob tài
   liệu qua `STORAGE_BACKEND=s3` (bucket riêng `rag-documents`).

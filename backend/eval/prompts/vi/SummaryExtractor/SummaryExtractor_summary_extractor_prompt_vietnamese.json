@@ -1,0 +1,16 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 1197204297732643345,
+  "language": "vietnamese",
+  "instruction": "Summarize the given text in less than 10 sentences.",
+  "examples": [
+    {
+      "input": {
+        "text": "Trí tuệ nhân tạo\n\nTrí tuệ nhân tạo đang chuyển đổi nhiều ngành công nghiệp khác nhau bằng cách tự động hóa các nhiệm vụ trước đây đòi hỏi trí thông minh của con người. Từ chăm sóc sức khỏe đến tài chính, AI đang được sử dụng để phân tích lượng lớn dữ liệu một cách nhanh chóng và chính xác. Công nghệ này cũng đang thúc đẩy các đổi mới trong các lĩnh vực như xe tự lái và các đề xuất được cá nhân hóa."
+      },
+      "output": {
+        "text": "AI đang cách mạng hóa các ngành công nghiệp bằng cách tự động hóa các nhiệm vụ, phân tích dữ liệu và thúc đẩy các đổi mới như xe tự lái và các đề xuất được cá nhân hóa."
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 1600239196832083832,
+  "language": "vietnamese",
+  "instruction": "Form combinations by pairing concepts from at least two different lists.\n**Instructions:**\n- Review the concepts from each node.\n- Identify concepts that can logically be connected or contrasted.\n- Form combinations that involve concepts from different nodes.\n- Each combination should include at least one concept from two or more nodes.\n- List the combinations clearly and concisely.\n- Do not repeat the same combination more than once.",
+  "examples": [
+    {
+      "input": {
+        "lists_of_concepts": [
+          [
+            "Trí tuệ nhân tạo",
+            "Tự động hóa"
+          ],
+          [
+            "Chăm sóc sức khỏe",
+            "Quyền riêng tư dữ liệu"
+          ]
+        ],
+        "max_combinations": 2
+      },
+      "output": {
+        "combinations": [
+          [
+            "Trí tuệ nhân tạo",
+            "Chăm sóc sức khỏe"
+          ],
+          [
+            "Tự động hóa",
+            "Quyền riêng tư dữ liệu"
+          ]
+        ]
+      }
+    }
+  ]
+}

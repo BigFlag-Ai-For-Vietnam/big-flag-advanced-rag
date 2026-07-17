@@ -14,6 +14,9 @@ venv/
 # *.db
 images/
 
+# eval-rag CLI local scratch output (generate --out-dir default; source of truth is MLflow)
+backend/eval_runs/
+
 # node / vite
 node_modules/
 dist/

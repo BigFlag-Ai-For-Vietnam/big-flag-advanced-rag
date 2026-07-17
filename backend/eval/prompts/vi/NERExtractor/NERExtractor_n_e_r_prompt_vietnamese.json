@@ -1,0 +1,25 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 2278855321993615703,
+  "language": "vietnamese",
+  "instruction": "Extract the named entities from the given text, limiting the output to the top entities. Ensure the number of entities does not exceed the specified maximum.",
+  "examples": [
+    {
+      "input": {
+        "text": "Elon Musk, CEO của Tesla và SpaceX, đã công bố kế hoạch mở rộng hoạt động đến các địa điểm mới ở Châu Âu và Châu Á.\n                Việc mở rộng này được dự kiến sẽ tạo ra hàng ngàn việc làm, đặc biệt là ở các thành phố như Berlin và Thượng Hải.",
+        "max_num": 10
+      },
+      "output": {
+        "entities": [
+          "Elon Musk",
+          "Tesla",
+          "SpaceX",
+          "Châu Âu",
+          "Châu Á",
+          "Berlin",
+          "Thượng Hải"
+        ]
+      }
+    }
+  ]
+}

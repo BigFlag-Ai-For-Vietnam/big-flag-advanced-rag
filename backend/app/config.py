@@ -50,6 +50,16 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
+    # --- Eval / MLflow ---
+    # Mặc định localhost phục vụ CLI chạy trên host; backend chạy trong container
+    # PHẢI override (http://host.docker.internal:5000 hoặc mạng compose chung) — xem FR-13.
+    mlflow_tracking_uri: str = "http://localhost:5000"
+    mlflow_experiment: str = "advanced-rag-eval"
+    # Rỗng -> fallback fpt_chat_model tại nơi dùng (judge factory trong llm_client, T05).
+    # KHÔNG resolve fallback ở đây: giữ "" để nơi dùng biết là chưa override.
+    eval_judge_model: str = ""
+    eval_max_workers: int = 4        # chặn song song mọi lời gọi LLM của eval (rate-limit FPT)
+
 
 @lru_cache
 def get_settings() -> Settings:

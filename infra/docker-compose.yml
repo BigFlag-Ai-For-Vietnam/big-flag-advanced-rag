@@ -1,14 +1,28 @@
-# Infra stack: MLflow tracking + RustFS (S3-compatible artifact store) + Postgres (backend store)
+# Infra stack: Qdrant (vector DB) + MLflow tracking + RustFS (S3-compatible artifact store)
+#              + Postgres (backend store)
 # Usage:
 #   cd infra && cp .env.example .env   # điền secrets
 #   docker compose up --build
 #
+# Qdrant:           http://localhost:6333 (dashboard: /dashboard)
 # MLflow UI:        http://localhost:5000
 # RustFS S3 API:    http://localhost:9000
 # RustFS Console:   http://localhost:9001
 # Postgres:         localhost:5432
+#
+# Network "rag-infra" là attachable: app compose (../docker-compose.yml) nối backend
+# vào đây để gọi qdrant/mlflow/rustfs theo service name.
 
 services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -85,6 +99,7 @@ services:
       --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
       --artifacts-destination s3://${MLFLOW_BUCKET:-mlflow}
       --serve-artifacts
+      --allowed-hosts "localhost,localhost:*,127.0.0.1,127.0.0.1:*,mlflow,mlflow:*,host.docker.internal,host.docker.internal:*"
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,6 +108,13 @@ services:
       createbuckets:
         condition: service_completed_successfully
 
+networks:
+  # Tên cố định + attachable để compose app (project khác) nối vào được.
+  default:
+    name: rag-infra
+    attachable: true
+
 volumes:
+  qdrant_data:
   postgres_data:
   rustfs_data:

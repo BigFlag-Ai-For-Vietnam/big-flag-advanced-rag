@@ -3,7 +3,7 @@
 FROM python:3.11-slim
 
 RUN pip install --no-cache-dir \
-    "mlflow==2.17.2" \
+    "mlflow==3.14.0" \
     "psycopg2-binary==2.9.10" \
     "boto3==1.35.71"
 

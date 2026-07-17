@@ -1,0 +1,4 @@
+-r requirements.txt
+ragas==0.4.3
+mlflow==3.14.0
+rapidfuzz==3.14.5

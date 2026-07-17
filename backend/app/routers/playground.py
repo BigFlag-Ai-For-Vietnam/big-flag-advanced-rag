@@ -9,47 +9,10 @@ from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.schemas.playground import Citation, QueryRequest, QueryResponse
-from app.services import embedding_service, llm_client, qdrant_service
+from app.services import llm_client, qa_service
 
 router = APIRouter(prefix="/api/playground", tags=["playground"])
 logger = logging.getLogger("playground")
-
-SYSTEM_PROMPT = (
-    "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
-    "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
-    "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
-)
-
-
-def _retrieve(question: str, top_k: int):
-    query_vec = embedding_service.embed_query(question)
-    hits = qdrant_service.search(query_vec, top_k)
-    citations = [
-        Citation(
-            document_id=h["payload"].get("document_id", ""),
-            title=h["payload"].get("title", ""),
-            chunk_index=h["payload"].get("chunk_index", -1),
-            score=h["score"],
-            final_content=h["payload"].get("final_content", ""),
-        )
-        for h in hits
-    ]
-    return citations
-
-
-def _build_messages(question: str, citations: list[Citation]) -> list[dict]:
-    context_blocks = [
-        f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
-        for i, c in enumerate(citations)
-    ]
-    context = "\n\n".join(context_blocks) if context_blocks else "(không có ngữ cảnh)"
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"NGỮ CẢNH:\n{context}\n\nCÂU HỎI: {question}",
-        },
-    ]
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -57,14 +20,14 @@ def query(req: QueryRequest):
     if not settings.fpt_chat_model or not settings.fpt_embed_model:
         raise HTTPException(status_code=503, detail="Chưa cấu hình FPT_CHAT_MODEL / FPT_EMBED_MODEL.")
 
-    citations = _retrieve(req.question, req.top_k)
-    messages = _build_messages(req.question, citations)
+    citations = qa_service.retrieve(req.question, req.top_k)
+    messages = qa_service.build_messages(req.question, citations)
 
     if req.stream:
         return StreamingResponse(_stream_answer(messages, citations), media_type="text/event-stream")
 
-    answer = llm_client.chat(messages, temperature=0.2, max_tokens=1024, tag="qa")
-    return QueryResponse(answer=answer, citations=citations)
+    answer_text = llm_client.chat(messages, temperature=0.2, max_tokens=1024, tag="qa")
+    return QueryResponse(answer=answer_text, citations=citations)
 
 
 def _stream_answer(messages: list[dict], citations: list[Citation]):

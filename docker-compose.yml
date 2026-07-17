@@ -1,12 +1,9 @@
-services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
+# App stack: backend + frontend.
+# Qdrant (cùng MLflow/RustFS/Postgres) nằm ở stack infra/ — chạy `make infra-up-d`
+# (hoặc `cd infra && docker compose up -d`) TRƯỚC, vì backend nối vào network
+# "rag-infra" của stack đó để gọi qdrant/mlflow theo service name.
 
+services:
   backend:
     build: ./backend
     ports:
@@ -14,15 +11,18 @@ services:
     env_file:
       - .env
     environment:
-      # override cho môi trường container (qdrant reachable qua service name)
+      # override cho môi trường container (services của infra/ reachable qua network rag-infra)
       QDRANT_URL: http://qdrant:6333
       DB_URL: sqlite:////data/rag.db
       DATA_DIR: /data
+      # MLflow (stack infra/) cùng network — /api/eval/* kết nối trực tiếp qua service name.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       # bind mount: db + PDF gốc + ảnh page nằm trực tiếp trong ./backend/data trên host
       - ./backend/data:/data
-    depends_on:
-      - qdrant
+    networks:
+      - default
+      - infra
 
   frontend:
     build: ./frontend
@@ -34,5 +34,8 @@ services:
     depends_on:
       - backend
 
-volumes:
-  qdrant_data:
+networks:
+  # Network của stack infra/ (docker compose ở đó tạo ra); phải tồn tại trước khi up.
+  infra:
+    external: true
+    name: rag-infra

@@ -1,0 +1,294 @@
+"""CLI đánh giá RAG: python -m eval <lệnh>. Các lệnh chưa hiện thực raise NotImplementedError."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+COMMANDS: tuple[str, ...] = ("generate", "adapt-prompts", "review-queue", "promote", "run")
+
+
+def cmd_generate(args: argparse.Namespace) -> int:
+    """Sinh testset (silver) từ tài liệu đã index: KG -> query_distribution -> per-persona
+    generate -> language gate -> report + silver JSONL. Yêu cầu: đã chạy `adapt-prompts`
+    trước (FR-5), có personas.json (FR-4), tài liệu ở trạng thái indexed (FR-1)."""
+    from eval.dataset_source import collect_chunks, build_and_log_kg
+    from eval.distribution import DistributionWeights, build_query_distribution
+    from eval.judge import build_judge
+    from eval.language_gate import apply_language_gate, enforce_quality, write_exclusion_report
+    from eval.personas import (
+        PersonaError,
+        load_personas,
+        log_personas_artifact,
+        plan_persona_batches,
+        stamp_persona_name,
+    )
+    from eval.prompt_adaptation import load_adapted_transforms
+
+    import mlflow
+    from app.config import settings
+    from app.db import SessionLocal
+    from ragas.testset import TestsetGenerator
+
+    prompts_dir = Path(args.prompts_dir)
+    try:
+        personas = load_personas(args.personas)
+    except PersonaError as exc:
+        print(f"Lỗi persona: {exc}", file=sys.stderr)
+        return 1
+
+    document_ids = None if args.all else (args.documents or [])
+    if not args.all and not document_ids:
+        print("Cần chỉ định --documents id[,id...] hoặc --all", file=sys.stderr)
+        return 1
+
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    mlflow.set_experiment(settings.mlflow_experiment)
+
+    session = SessionLocal()
+    try:
+        chunks = collect_chunks(session, document_ids)
+    finally:
+        session.close()
+
+    if not chunks:
+        print("Không có chunk nào để sinh testset (kiểm tra trạng thái indexed).", file=sys.stderr)
+        return 1
+
+    bundle = build_judge()
+    mlflow.openai.autolog()  # trace tự động mọi lời gọi LLM/embedding (KG transforms + generate)
+
+    with mlflow.start_run(run_name="eval-generate"):
+        log_personas_artifact(args.personas)  # NFR-4: personas.json là input, phải log lại
+        kg_path = Path(args.out_dir) / "kg.json"
+        if args.kg_file:
+            # KG ngoài (FR-2): chunk node thô (không transforms) + entities/relations từ contract.
+            from eval.kg_contract import contract_to_kg, load_contract
+
+            kg = build_and_log_kg(chunks, kg_path, transforms=[])
+            kg = contract_to_kg(load_contract(args.kg_file), kg)
+            kg.save(str(kg_path))
+            mlflow.log_artifact(str(kg_path))
+        else:
+            transforms = load_adapted_transforms(bundle.llm, bundle.embeddings, prompts_dir)
+            kg = build_and_log_kg(chunks, kg_path, transforms=transforms)
+            if prompts_dir.exists():  # NFR-4: log đúng version prompt đã dùng để sinh dataset này
+                mlflow.log_artifacts(str(prompts_dir), artifact_path="prompts")
+
+        weights = DistributionWeights(
+            single_hop_specific=args.w_single,
+            multi_hop_abstract=args.w_multi_abstract,
+            multi_hop_specific=args.w_multi_specific,
+        )
+        distribution = build_query_distribution(bundle.llm, weights=weights)
+        # Synthesizer trọng số 0 vẫn PHẢI bị loại khỏi distribution trước khi generate():
+        # ragas._generate_scenarios của multi-hop tính cluster bất kể n, raise ValueError
+        # nếu KG không có cluster nào — kể cả khi n=0. Trọng số 0 không tự động an toàn.
+        distribution = [(synth, w) for synth, w in distribution if w > 0]
+        batches = plan_persona_batches(personas, args.size)
+
+        all_samples: list[dict] = []
+        for batch in batches:
+            generator = TestsetGenerator(
+                llm=bundle.llm,
+                embedding_model=bundle.embeddings,
+                knowledge_graph=kg,
+                persona_list=[batch.persona.to_ragas()],
+            )
+            testset = generator.generate(testset_size=batch.size, query_distribution=distribution)
+            eval_samples = [s.eval_sample for s in testset.samples]
+            stamp_persona_name(eval_samples, batch.persona.name)
+            for s, sample in zip(testset.samples, eval_samples):
+                d = sample.model_dump(exclude_none=True)
+                d["synthesizer_name"] = s.synthesizer_name
+                all_samples.append(d)
+
+        gate_result = apply_language_gate(all_samples, threshold=args.max_exclusion_rate)
+        report_path = Path(args.out_dir) / "language_gate_report.json"
+        write_exclusion_report(gate_result, report_path)
+        mlflow.log_artifact(str(report_path))
+
+        silver_path = Path(args.out_dir) / "silver.jsonl"
+        silver_path.parent.mkdir(parents=True, exist_ok=True)
+        with silver_path.open("w", encoding="utf-8") as f:
+            for sample in gate_result.retained:
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        mlflow.log_artifact(str(silver_path))
+
+        if gate_result.failed_quality:
+            mlflow.set_tag("quality_gate", "failed")
+            print(
+                f"Cổng chất lượng ngôn ngữ THẤT BẠI: tỉ lệ loại {gate_result.exclusion_rate:.1%} "
+                f"vượt ngưỡng {gate_result.threshold:.1%}.",
+                file=sys.stderr,
+            )
+            return enforce_quality(gate_result)
+
+        mlflow.set_tag("quality_gate", "passed")
+        print(f"Sinh {len(gate_result.retained)} mẫu silver tại {silver_path}")
+        return 0
+
+
+def cmd_adapt_prompts(args: argparse.Namespace) -> int:
+    """Adapt prompt synthesizer + extractor sang tiếng Việt (chạy 1 lần, cần FPT_API_KEY)."""
+    from eval.judge import build_judge
+    from eval.prompt_adaptation import adapt_and_save_all
+
+    bundle = build_judge()
+    prompts_dir = Path(args.prompts_dir)
+    asyncio.run(adapt_and_save_all(bundle.llm, prompts_dir))
+    print(f"Đã adapt + lưu prompt tiếng Việt vào {prompts_dir}")
+    return 0
+
+
+def cmd_review_queue(args: argparse.Namespace) -> int:
+    """Tạo MLflow Review Queue cho SME duyệt silver traces của --dataset."""
+    from eval.review_queue import create_dataset_review_queue
+
+    queue_id = create_dataset_review_queue(args.dataset)
+    print(f"Đã tạo review queue: {queue_id}")
+    return 0
+
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    """Gom trace silver đã SME duyệt -> golden Evaluation Dataset (FR-8)."""
+    import mlflow
+    from mlflow.exceptions import MlflowException
+    from mlflow.genai.datasets import create_dataset, get_dataset
+
+    from app.config import settings
+    from eval.promote import promote
+
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    experiment = mlflow.set_experiment(settings.mlflow_experiment)
+
+    def _search_traces(*, filter_string):
+        combined = f"tags.dataset_name = '{args.dataset}' AND {filter_string}"
+        return mlflow.search_traces(
+            locations=[experiment.experiment_id],
+            filter_string=combined,
+            return_type="list",
+        )
+
+    def _get_or_create_dataset(name):
+        try:
+            return get_dataset(name=name)
+        except MlflowException:
+            return create_dataset(name=name, experiment_id=[experiment.experiment_id])
+
+    result = promote(
+        args.dataset,
+        search_traces=_search_traces,
+        get_or_create_dataset=_get_or_create_dataset,
+        log_text=mlflow.log_text,
+    )
+    print(f"Đã promote {len(result.records)} mẫu vào dataset {result.dataset_name}")
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Chạy eval: nạp dataset -> RAG thật (có trace) qua qa_service -> chấm bằng tích hợp
+    native mlflow.genai.evaluate() + mlflow.genai.scorers.ragas (KHÔNG dùng ragas.evaluate()
+    thủ công — MLflow tự tạo Evaluations view, log assessment lên từng trace).
+
+    Judge FPT được truyền cho scorer dưới dạng model URI ("openai:/<model>") — cơ chế của
+    mlflow.genai.scorers.ragas chỉ nhận URI, tự dựng client bên trong qua litellm/openai SDK,
+    nên KHÔNG thể tiêm qua llm_client.make_openai_client() như các nơi khác trong eval/.
+    Đây là giới hạn của chính tích hợp native, không phải lựa chọn thiết kế ở đây — vẫn cấu
+    hình endpoint FPT qua biến môi trường chuẩn OpenAI (OPENAI_API_KEY/OPENAI_API_BASE)."""
+    import os
+
+    import mlflow
+
+    from app.config import settings
+    from app.services.llm_client import make_openai_client
+    from eval.runner import run as run_eval
+
+    os.environ["OPENAI_API_KEY"] = settings.fpt_api_key
+    os.environ["OPENAI_API_BASE"] = settings.fpt_base_url
+    os.environ["OPENAI_BASE_URL"] = settings.fpt_base_url
+
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    mlflow.set_experiment(settings.mlflow_experiment)
+    mlflow.openai.autolog()
+
+    traces = run_eval(args.dataset, top_k=args.top_k)
+    if not traces:
+        print("Dataset rỗng, không có gì để eval.", file=sys.stderr)
+        return 1
+
+    from ragas.embeddings import OpenAIEmbeddings
+    from mlflow.genai.scorers.ragas import (
+        AnswerRelevancy,
+        ContextPrecision,
+        ContextRecall,
+        FactualCorrectness,
+        Faithfulness,
+    )
+
+    judge_uri = f"openai:/{settings.eval_judge_model or settings.fpt_chat_model}"
+    embeddings = OpenAIEmbeddings(client=make_openai_client(async_client=True), model=settings.fpt_embed_model)
+    scorers = [
+        Faithfulness(model=judge_uri),
+        AnswerRelevancy(model=judge_uri, embeddings=embeddings),
+        ContextPrecision(model=judge_uri),
+        ContextRecall(model=judge_uri),
+        FactualCorrectness(model=judge_uri),
+    ]
+
+    mlflow.genai.evaluate(data=traces, scorers=scorers)
+    print(f"Eval xong: {len(traces)} mẫu. Xem kết quả ở MLflow — tab Evaluations của experiment.")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m eval", description="RAG evaluation CLI (RAGAS + MLflow)")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_generate = sub.add_parser("generate", help="Sinh testset silver từ tài liệu đã index")
+    p_generate.add_argument("--documents", nargs="+", default=None, help="Danh sách document id")
+    p_generate.add_argument("--all", action="store_true", help="Dùng mọi tài liệu đã indexed")
+    p_generate.add_argument("--size", type=int, default=10, help="Tổng số câu hỏi sinh ra")
+    p_generate.add_argument("--personas", default="personas.json", help="Đường dẫn personas.json (bắt buộc)")
+    p_generate.add_argument("--prompts-dir", default=None, help="Thư mục prompt đã adapt (mặc định: eval/prompts/vi)")
+    p_generate.add_argument("--max-exclusion-rate", type=float, default=0.2, help="Ngưỡng loại tối đa (NFR-5)")
+    p_generate.add_argument("--out-dir", default="eval_runs/generate", help="Thư mục ghi artifact")
+    p_generate.add_argument("--kg-file", default=None, help="KG ngoài theo contract v1 (FR-2), thay cho KG tự dựng")
+    p_generate.add_argument("--w-single", type=float, default=0.5, help="Trọng số single-hop specific (mặc định 0.5)")
+    p_generate.add_argument("--w-multi-abstract", type=float, default=0.25, help="Trọng số multi-hop abstract (mặc định 0.25)")
+    p_generate.add_argument("--w-multi-specific", type=float, default=0.25, help="Trọng số multi-hop specific (mặc định 0.25)")
+    p_generate.set_defaults(func=cmd_generate)
+
+    p_adapt = sub.add_parser("adapt-prompts", help="Adapt prompt synthesizer/extractor sang tiếng Việt")
+    p_adapt.add_argument("--prompts-dir", default=None, help="Thư mục lưu prompt đã adapt (mặc định: eval/prompts/vi)")
+    p_adapt.set_defaults(func=cmd_adapt_prompts)
+
+    p_review_queue = sub.add_parser("review-queue", help="Tạo MLflow Review Queue cho SME duyệt silver")
+    p_review_queue.add_argument("--dataset", required=True, help="Tên dataset (tag dataset_name của trace silver)")
+    p_review_queue.set_defaults(func=cmd_review_queue)
+
+    p_promote = sub.add_parser("promote", help="Gom trace đã SME duyệt vào golden Evaluation Dataset")
+    p_promote.add_argument("--dataset", required=True, help="Tên dataset (tag dataset_name của trace silver)")
+    p_promote.set_defaults(func=cmd_promote)
+
+    p_run = sub.add_parser("run", help="Chạy RAG thật + ragas evaluate trên 1 dataset, ghi MLflow run")
+    p_run.add_argument("--dataset", required=True, help="Tên golden dataset (MLflow) hoặc đường dẫn silver JSONL")
+    p_run.add_argument("--top-k", type=int, default=5, help="Số chunk retrieval (mặc định khớp playground)")
+    p_run.set_defaults(func=cmd_run)
+    return parser
+
+
+def _resolve_prompts_dir(args: argparse.Namespace) -> None:
+    """--prompts-dir mặc định None -> dùng DEFAULT_PROMPTS_DIR của prompt_adaptation (lazy import)."""
+    if getattr(args, "prompts_dir", None) is None:
+        from eval.prompt_adaptation import DEFAULT_PROMPTS_DIR
+        args.prompts_dir = str(DEFAULT_PROMPTS_DIR)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command in ("generate", "adapt-prompts"):
+        _resolve_prompts_dir(args)
+    return args.func(args)
