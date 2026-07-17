@@ -4,8 +4,10 @@ Nền tảng RAG greenfield: upload PDF → parse chất lượng cao bằng VLM
 **Contextual Retrieval** (Anthropic) → index vào Qdrant → hỏi–đáp ở Playground.
 
 ## Kiến trúc
-- **Backend**: FastAPI + SQLAlchemy 2 + SQLite (metadata / parse pages / chunks).
+Mô hình **ba kho lưu trữ**:
+- **Backend**: FastAPI + SQLAlchemy 2 + SQLite (metadata / parse pages / chunks — toàn bộ raw text).
 - **Vector DB**: Qdrant — CHỈ giữ vector + payload nhỏ (`document_id, chunk_id, chunk_index, title, final_content`). Raw text nằm ở SQLite.
+- **Blob storage**: PDF gốc + ảnh page (PNG) đi qua `storage_service` — backend `local` (đĩa, mặc định) hoặc `s3` (RustFS / S3-compatible). Xem [Lưu trữ file](#lưu-trữ-file-storage).
 - **LLM/VLM/Embedding**: FPT AI Marketplace (OpenAI-compatible) qua thư viện `openai`.
 - **Frontend**: React + Vite + TypeScript (3 trang: Upload, Documents, Playground).
 
@@ -22,6 +24,7 @@ backend/app
    ├─ chunking_service.py  # SentenceSplitter + câu định vị + final_content
    ├─ embedding_service.py # embed batch
    ├─ qdrant_service.py    # ensure/upsert/search/delete
+   ├─ storage_service.py   # choke point blob I/O (PDF + ảnh page): backend local|s3
    └─ pipeline.py          # A(parse) → B(chunk+context) → C(index)
 ```
 
@@ -36,6 +39,7 @@ Sao chép `.env.example` → `.env` và điền:
 | `FPT_EMBED_MODEL` | Model embedding | Gợi ý tiếng Việt: `Vietnamese_Embedding`, `bge-m3`, `multilingual-e5-large` |
 | `EMBED_DIM` | Số chiều vector | **Phải khớp** model embedding (vd bge-m3 = 1024) |
 | `FPT_ENABLE_PROMPT_CACHE` | Bật cache_control | Để `false` — FPT chưa xác nhận hỗ trợ |
+| `STORAGE_BACKEND` | Nơi lưu blob PDF + ảnh page | `local` (mặc định) hoặc `s3` (RustFS). Xem [Lưu trữ file](#lưu-trữ-file-storage) |
 
 > Model ID và `EMBED_DIM` **không hardcode** trong code — luôn đọc từ `.env`.
 > `EMBED_DIM` sai sẽ khiến Qdrant upsert lỗi.
@@ -61,6 +65,49 @@ uvicorn app.main:app --reload   # cần .env ở thư mục backend hoặc expor
 # Frontend
 cd frontend && npm install && npm run dev
 ```
+
+## Lưu trữ file (storage)
+PDF gốc và ảnh page (PNG render để gửi VLM) được lưu qua **`storage_service`** — một
+choke point duy nhất, chọn backend bằng `STORAGE_BACKEND`:
+
+- **`local`** (mặc định): ghi xuống đĩa dưới `DATA_DIR` (`uploads/{id}.pdf`,
+  `images/{id}/page_*.png`). Trong Docker nằm ở named volume `backend_data`.
+- **`s3`**: đẩy lên bucket S3 trên **RustFS** (hoặc bất kỳ endpoint S3-compatible). Bật bằng:
+
+  ```env
+  STORAGE_BACKEND=s3
+  S3_ENDPOINT_URL=http://localhost:9000   # RustFS S3 API (infra); trong compose chung mạng: http://rustfs:9000
+  S3_ACCESS_KEY=rustfsadmin
+  S3_SECRET_KEY=rustfsadmin
+  S3_BUCKET=rag-documents                 # tách khỏi bucket "mlflow" của infra; tự tạo nếu chưa có
+  S3_REGION=us-east-1
+  ```
+
+`Document.file_path` và `Page.image_ref` lưu **storage key** (vd `uploads/{id}.pdf`),
+không phải path tuyệt đối — `storage_service` phân giải theo backend. Cần `boto3` (đã có
+trong `requirements.txt`) khi dùng `s3`.
+
+> RustFS chạy trong stack `infra/` (mặc định tách mạng với app compose). Dùng `s3` cần cho
+> backend truy cập được endpoint đó (chung Docker network hoặc endpoint ngoài).
+
+## Infra stack (MLflow + RustFS + Postgres)
+Stack quan sát/thí nghiệm **độc lập** với app, nằm ở `infra/` (compose riêng):
+
+```bash
+cd infra && cp .env.example .env && docker compose up --build
+```
+
+| Service        | URL                     | Ghi chú                          |
+| -------------- | ----------------------- | -------------------------------- |
+| MLflow UI      | http://localhost:5000   | tracking + artifact serving      |
+| RustFS Console | http://localhost:9001   | login bằng RUSTFS_ACCESS/SECRET  |
+| RustFS S3 API  | http://localhost:9000   | endpoint S3-compatible           |
+| Postgres       | localhost:5432          | MLflow backend store (db `mlflow`) |
+
+- **MLflow** dùng Postgres làm backend store và RustFS làm artifact store (`--serve-artifacts`).
+- **RustFS** là object storage S3-compatible; ngoài MLflow, app có thể tái dùng cho blob tài
+  liệu qua `STORAGE_BACKEND=s3` (bucket riêng `rag-documents`).
+- Chi tiết đầy đủ: [`infra/README.md`](infra/README.md).
 
 ## Luồng end-to-end
 1. **Upload** một PDF → pipeline chạy nền (`BackgroundTasks`):
@@ -89,3 +136,5 @@ Test cover: `split_text` (chunk_size/overlap/separator) và `build_final_content
 - Thay `BackgroundTasks` bằng **Celery** để xử lý nền bền vững.
 - Alembic migration thay `create_all`.
 - Serve frontend build tĩnh qua nginx thay vì vite dev server.
+- Nối app compose với RustFS (chung network) để `STORAGE_BACKEND=s3` chạy liền mạch;
+  hiện đã có storage layer (`storage_service`, `local|s3`) nhưng networking để tự cấu hình.

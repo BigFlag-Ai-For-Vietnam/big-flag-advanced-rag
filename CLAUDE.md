@@ -44,10 +44,12 @@ backend/app/
     chunking_service.py SentenceSplitter + LLM contextual prefix
     embedding_service.py + qdrant_service.py  embed + upsert/search
     llm_client.py      single choke point for all FPT calls (chat/stream/vision/embed)
+    storage_service.py single choke point for all blob I/O (PDF + page PNGs); local|s3 backend
 frontend/src/
   api/client.ts        backend client
   pages/               Upload, Documents, Playground
-infra/                 MLflow + RustFS + Postgres compose (independent of app)
+infra/                 MLflow + RustFS + Postgres compose. MLflow uses RustFS for artifacts;
+                       the app can optionally reuse RustFS for document blobs (STORAGE_BACKEND=s3).
 ```
 
 ## Load-bearing config (read before touching model calls)
@@ -57,12 +59,14 @@ Model IDs and vector dimension come from `.env` via `config.py`. Two settings br
 - **`EMBED_DIM`** must match the embedding model's output dimension, or Qdrant upsert fails (collection is created once at this size; changing it later means recreating the collection).
 - **`FPT_VLM_MODEL`** must be a genuine **vision** model (accepts `image_url`); a chat-only model silently returns empty text. `PARSE_TEXT_FALLBACK=true` falls back to the PDF text layer when the VLM returns empty.
 - **`FPT_ENABLE_PROMPT_CACHE`** — keep `false`; FPT hasn't confirmed `cache_control` support.
+- **`STORAGE_BACKEND`** — `local` (default; blobs on disk under `DATA_DIR`, Docker volume `backend_data`) or `s3` (RustFS / any S3-compatible endpoint). `s3` needs `S3_ENDPOINT_URL` + keys + `S3_BUCKET` reachable — RustFS runs in `infra/` on `:9000` (`http://rustfs:9000` inside a shared compose network). The app bucket (`rag-documents`) is deliberately separate from MLflow's `mlflow` bucket. The compose files are independent by default, so `s3` mode requires you to make RustFS reachable from the backend (shared network / external endpoint).
 
 ## Key invariants
 
-- **Two-store design**: SQLite holds all raw text (documents, per-page/-chunk text). Qdrant holds only vectors + a *small* payload (`document_id, chunk_id, chunk_index, title, final_content`). Never move bulk raw text into Qdrant. `document_id` is a keyword index for filtered delete.
+- **Three-store design**: SQLite holds all raw text (documents, per-page/-chunk text). Qdrant holds only vectors + a *small* payload (`document_id, chunk_id, chunk_index, title, final_content`) — never move bulk raw text into Qdrant; `document_id` is a keyword index for filtered delete. Blobs (source PDF + rendered page PNGs) live in **object/FS storage** via `storage_service`, keyed as `uploads/{id}.pdf` and `images/{id}/page_*.png`; `Document.file_path` / `Page.image_ref` store these **storage keys**, not absolute paths.
 - **Pipeline** runs in the background via `BackgroundTasks` (own DB session); reprocess wipes old pages/chunks + Qdrant points first, so it's idempotent.
 - **LLM boundary**: add new model interactions in `llm_client.py`, not by calling `openai` directly elsewhere.
+- **Storage boundary**: add new blob reads/writes/deletes in `storage_service.py`, not by calling `boto3`/`open()` directly elsewhere. Keeps `local`/`s3` swappable and offline tests boto3-free.
 - **Tests** (`backend/tests/`) are pure offline unit tests over `chunking_service`; keep new tests offline (FPT-dependent paths aren't covered).
 
 ## Known v1 shortcuts (per README)
