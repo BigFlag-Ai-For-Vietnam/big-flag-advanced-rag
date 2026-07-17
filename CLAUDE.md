@@ -8,6 +8,39 @@ A greenfield RAG platform: upload a PDF → parse with a VLM → chunk with **Co
 
 Note: code comments, docstrings, prompts, and the README are written in Vietnamese. User-facing responses (LLM answers, error messages) are also Vietnamese by design.
 
+## Tech stack
+Core frameworks/systems only; versions are pinned in `requirements.txt` / `package.json`, and model IDs + `EMBED_DIM` come from `.env` (never hardcoded).
+
+**Backend**
+
+| Tech | Role |
+|------|------|
+| FastAPI | REST API framework |
+| SQLAlchemy 2 + SQLite | ORM + relational store (all raw text) |
+| Pydantic 2 | Request/response schemas + `.env` config |
+| Qdrant | Vector database (vectors + small payload) |
+| LlamaIndex | `SentenceSplitter` chunking |
+| OpenAI SDK | Client for all FPT AI Marketplace calls |
+| pdfplumber | PDF page render + text-layer fallback |
+
+**Frontend**
+
+| Tech | Role |
+|------|------|
+| React 18 | UI (Upload / Documents / Playground) |
+| Vite | Dev server + build/typecheck |
+| TypeScript | Static typing |
+
+**External / Infra**
+
+| Tech | Role |
+|------|------|
+| FPT AI Marketplace | OpenAI-compatible LLM/VLM/embedding provider |
+| Docker Compose | App + infra orchestration |
+| MLflow | Experiment tracking (`infra/` stack) |
+| RustFS | S3-compatible object storage (MLflow artifacts + optional app blobs) |
+| Postgres | MLflow backend store (`infra/` stack) |
+
 ## Commands
 
 ```bash

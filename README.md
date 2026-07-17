@@ -28,6 +28,40 @@ backend/app
    └─ pipeline.py          # A(parse) → B(chunk+context) → C(index)
 ```
 
+## Tech stack
+Chỉ liệt kê framework / hệ thống cốt lõi; version pin trong `requirements.txt` và
+`package.json`, model ID + `EMBED_DIM` đọc từ `.env` (không hardcode).
+
+**Backend**
+
+| Công nghệ | Vai trò |
+|-----------|---------|
+| FastAPI | Framework REST API |
+| SQLAlchemy 2 + SQLite | ORM + kho quan hệ (toàn bộ raw text) |
+| Pydantic 2 | Schema request/response + đọc cấu hình `.env` |
+| Qdrant | Vector database (vector + payload nhỏ) |
+| LlamaIndex | `SentenceSplitter` cho chunking |
+| OpenAI SDK | Client cho mọi lời gọi FPT AI Marketplace |
+| pdfplumber | Render page PDF + text-layer dự phòng |
+
+**Frontend**
+
+| Công nghệ | Vai trò |
+|-----------|---------|
+| React 18 | Giao diện (Upload / Documents / Playground) |
+| Vite | Dev server + build/typecheck |
+| TypeScript | Kiểu tĩnh |
+
+**External / Infra**
+
+| Công nghệ | Vai trò |
+|-----------|---------|
+| FPT AI Marketplace | Nhà cung cấp LLM/VLM/Embedding (OpenAI-compatible) |
+| Docker Compose | Điều phối app + infra |
+| MLflow | Theo dõi thí nghiệm (stack `infra/`) |
+| RustFS | Object storage S3-compatible (artifact MLflow + blob app tuỳ chọn) |
+| Postgres | Backend store của MLflow (stack `infra/`) |
+
 ## ⚠️ Cần cấu hình trước khi chạy
 Sao chép `.env.example` → `.env` và điền:
 
