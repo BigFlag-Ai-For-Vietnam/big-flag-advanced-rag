@@ -33,6 +33,8 @@ class Document(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     title: Mapped[str] = mapped_column(String(512))
     original_filename: Mapped[str] = mapped_column(String(512))
+    # STORAGE KEY của PDF gốc (vd "uploads/{id}.pdf"), phân giải bởi storage_service
+    # theo backend (local: {data_dir}/{key}; s3: object key trong bucket) — không phải path tuyệt đối.
     file_path: Mapped[str] = mapped_column(String(1024))
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, native_enum=False, length=20),

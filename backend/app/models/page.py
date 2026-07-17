@@ -24,6 +24,7 @@ class Page(Base):
         String(36), ForeignKey("documents.id", ondelete="CASCADE"), index=True
     )
     page_number: Mapped[int] = mapped_column(Integer)
+    # STORAGE KEY ảnh PNG của trang (vd "images/{doc_id}/page_0001.png") qua storage_service.
     image_ref: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     parsed_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -36,7 +36,15 @@ class Settings(BaseSettings):
 
     # --- Storage / DB ---
     db_url: str = "sqlite:///./data/rag.db"
-    data_dir: str = "./data"         # nơi lưu file PDF gốc + ảnh page tạm
+    data_dir: str = "./data"         # gốc lưu blob khi storage_backend="local"
+    # Backend lưu blob (PDF gốc + ảnh page): "local" (đĩa dưới data_dir) hoặc "s3" (RustFS).
+    storage_backend: str = "local"
+    # Cấu hình S3/RustFS — chỉ dùng khi storage_backend="s3".
+    s3_endpoint_url: str = "http://localhost:9000"   # RustFS S3 API (trong infra compose: http://rustfs:9000)
+    s3_access_key: str = "rustfsadmin"
+    s3_secret_key: str = "rustfsadmin"
+    s3_bucket: str = "rag-documents"                 # tách biệt bucket "mlflow" của infra
+    s3_region: str = "us-east-1"
 
     # --- Chunking ---
     chunk_size: int = 1000
