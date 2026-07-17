@@ -59,45 +59,66 @@ def _is_cache_control_error(exc: Exception) -> bool:
     return "cache_control" in msg or "cache-control" in msg
 
 
+def _is_unsupported_param_error(exc: Exception) -> bool:
+    """Model không hỗ trợ param (vd enable_thinking/chat_template_kwargs với model non-GLM)."""
+    msg = str(exc).lower()
+    return "unsupported parameter" in msg or "enable_thinking" in msg or "chat_template_kwargs" in msg
+
+
+def _thinking_extra(disable_thinking: bool) -> dict | None:
+    """extra_body để tắt reasoning của model GLM (chat_template_kwargs.enable_thinking=False)."""
+    if not disable_thinking:
+        return None
+    return {"chat_template_kwargs": {"enable_thinking": False}}
+
+
 def chat(
     messages: list[dict],
     *,
     model: str | None = None,
     cacheable_prefix_index: int | None = None,
+    disable_thinking: bool | None = None,
     temperature: float = 0.2,
     max_tokens: int | None = 1024,
     tag: str = "chat",
 ) -> str:
     """Gọi chat completion non-stream, trả về text.
 
-    cacheable_prefix_index: index của message (thường là system/document prefix) cần
-    đánh dấu cache_control khi FPT_ENABLE_PROMPT_CACHE bật. Nếu server từ chối field,
-    tự động thử lại không kèm cache_control.
+    cacheable_prefix_index: index của message (document prefix) để đánh dấu cache_control
+    khi FPT_ENABLE_PROMPT_CACHE bật; nếu server từ chối field -> tự gửi lại không kèm.
+    disable_thinking: tắt reasoning của GLM (mặc định lấy từ settings). Nếu model không
+    hỗ trợ param -> tự gửi lại không kèm extra_body.
     """
     model = model or settings.fpt_chat_model
     if not model:
         raise LLMError("FPT_CHAT_MODEL chưa được cấu hình (.env).")
+    if disable_thinking is None:
+        disable_thinking = settings.fpt_disable_thinking
 
     use_cache = settings.fpt_enable_prompt_cache and cacheable_prefix_index is not None
     payload_messages = _with_cache_control(messages, cacheable_prefix_index) if use_cache else messages
+    extra_body = _thinking_extra(disable_thinking)
 
     client = _client()
+
+    def _call(msgs, eb):
+        kwargs = dict(model=model, messages=msgs, temperature=temperature, max_tokens=max_tokens)
+        if eb:
+            kwargs["extra_body"] = eb
+        return client.chat.completions.create(**kwargs)
+
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=payload_messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        resp = _call(payload_messages, extra_body)
     except Exception as exc:  # noqa: BLE001
         if use_cache and _is_cache_control_error(exc):
-            logger.warning("cache_control không được hỗ trợ, fallback gửi thường: %s", exc)
-            resp = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            logger.warning("cache_control không hỗ trợ, fallback gửi thường: %s", exc)
+            try:
+                resp = _call(messages, extra_body)
+            except Exception as exc2:  # noqa: BLE001
+                resp = _call(messages, None)
+        elif _is_unsupported_param_error(exc):
+            logger.warning("enable_thinking không hỗ trợ, fallback không extra_body: %s", exc)
+            resp = _call(payload_messages, None)
         else:
             raise LLMError(f"chat() lỗi: {exc}") from exc
 
@@ -109,6 +130,7 @@ def chat_stream(
     messages: list[dict],
     *,
     model: str | None = None,
+    disable_thinking: bool | None = None,
     temperature: float = 0.2,
     max_tokens: int | None = 1024,
     tag: str = "chat_stream",
@@ -117,16 +139,29 @@ def chat_stream(
     model = model or settings.fpt_chat_model
     if not model:
         raise LLMError("FPT_CHAT_MODEL chưa được cấu hình (.env).")
+    if disable_thinking is None:
+        disable_thinking = settings.fpt_disable_thinking
 
     client = _client()
-    try:
-        stream = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
+
+    def _open_stream(eb):
+        kwargs = dict(
+            model=model, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, stream=True,
         )
+        if eb:
+            kwargs["extra_body"] = eb
+        return client.chat.completions.create(**kwargs)
+
+    try:
+        try:
+            stream = _open_stream(_thinking_extra(disable_thinking))
+        except Exception as exc:  # noqa: BLE001
+            if _is_unsupported_param_error(exc):
+                logger.warning("enable_thinking không hỗ trợ (stream), fallback: %s", exc)
+                stream = _open_stream(None)
+            else:
+                raise
         for chunk in stream:
             if not chunk.choices:
                 continue

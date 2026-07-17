@@ -69,8 +69,9 @@ def _generate_context(full_document_text: str, chunk_text: str) -> str:
     return llm_client.chat(
         messages,
         cacheable_prefix_index=0,  # document prefix dùng lại giữa các chunk
+        disable_thinking=True,     # GLM reasoning sẽ ngốn hết token budget -> content rỗng
         temperature=0.0,
-        max_tokens=256,
+        max_tokens=settings.contextual_max_tokens,
         tag="contextual",
     )
 
