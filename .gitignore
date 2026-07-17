@@ -22,3 +22,11 @@ dist/
 # os
 .DS_Store
 Thumbs.db
+
+# claude local settings
+.claude/settings.local.json
+
+# meokit — local spec-driven dev kit (kit + artifacts stay local)
+meokit/
+.claude/skills/
+CLAUDE.local.md

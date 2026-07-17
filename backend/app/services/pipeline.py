@@ -5,13 +5,17 @@ Chạy nền bằng FastAPI BackgroundTasks (v1). Hướng nâng cấp v2: Celer
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 
-from app.config import settings
 from app.db import SessionLocal
 from app.models import Chunk, Document, DocumentStatus, Page
-from app.services import chunking_service, embedding_service, parsing_service, qdrant_service
+from app.services import (
+    chunking_service,
+    embedding_service,
+    parsing_service,
+    qdrant_service,
+    storage_service,
+)
 
 logger = logging.getLogger("pipeline")
 
@@ -37,8 +41,8 @@ def run_pipeline(document_id: str) -> None:
 
         # --- A. Parsing ---
         _set_status(db, document, DocumentStatus.parsing)
-        image_dir = os.path.join(settings.data_dir, "images", document.id)
-        pages = parsing_service.parse_pdf(document.file_path, image_dir=image_dir)
+        pdf_bytes = storage_service.get_bytes(document.file_path)
+        pages = parsing_service.parse_pdf(pdf_bytes, document.id)
         for p in pages:
             db.add(
                 Page(

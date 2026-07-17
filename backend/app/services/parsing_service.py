@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -21,7 +20,7 @@ import pdfplumber
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.services import llm_client
+from app.services import llm_client, storage_service
 
 logger = logging.getLogger("parsing_service")
 
@@ -69,22 +68,22 @@ def _parse_page_image(png: bytes) -> str:
     return strip_code_fence(raw)
 
 
-def parse_pdf(file_path: str, image_dir: str | None = None) -> list[dict]:
-    """Parse toàn bộ PDF. Trả về list[{page_number, parsed_text, image_ref, used_fallback}].
+def parse_pdf(pdf_bytes: bytes, document_id: str | None = None) -> list[dict]:
+    """Parse toàn bộ PDF (bytes). Trả về list[{page_number, parsed_text, image_ref, used_fallback}].
 
-    image_dir: nếu có, lưu ảnh mỗi trang ra file để tham chiếu; nếu None thì không lưu.
+    document_id: nếu có, lưu ảnh mỗi trang qua storage_service (key images/{id}/page_XXXX.png)
+    và trả về key đó làm image_ref; nếu None thì không lưu ảnh.
     """
     rendered: list[tuple[int, bytes, str | None, str]] = []
-    with pdfplumber.open(file_path) as pdf:
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for i, page in enumerate(pdf.pages, start=1):
             png = render_page_png(page)
             text_layer = (page.extract_text() or "").strip()
             image_ref = None
-            if image_dir:
-                os.makedirs(image_dir, exist_ok=True)
-                image_ref = os.path.join(image_dir, f"page_{i:04d}.png")
-                with open(image_ref, "wb") as fh:
-                    fh.write(png)
+            if document_id:
+                image_ref = storage_service.put_bytes(
+                    f"images/{document_id}/page_{i:04d}.png", png
+                )
             rendered.append((i, png, image_ref, text_layer))
 
     results: dict[int, dict] = {}

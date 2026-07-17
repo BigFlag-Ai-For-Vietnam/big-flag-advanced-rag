@@ -8,7 +8,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, U
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.db import get_db
 from app.models import Chunk, Document, DocumentStatus
 from app.schemas.document import (
@@ -17,7 +16,7 @@ from app.schemas.document import (
     DocumentSummary,
     StatusResponse,
 )
-from app.services import pipeline, qdrant_service
+from app.services import pipeline, qdrant_service, storage_service
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -44,17 +43,15 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file PDF.")
 
     document_id = str(uuid.uuid4())
-    upload_dir = os.path.join(settings.data_dir, "uploads")
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, f"{document_id}.pdf")
-    with open(file_path, "wb") as fh:
-        fh.write(await file.read())
+    # file_path lưu STORAGE KEY (không phải path tuyệt đối) — storage_service phân giải
+    # theo backend (local: {data_dir}/{key}, s3: object key trong bucket).
+    file_key = storage_service.put_bytes(f"uploads/{document_id}.pdf", await file.read())
 
     doc = Document(
         id=document_id,
         title=os.path.splitext(file.filename)[0],
         original_filename=file.filename,
-        file_path=file_path,
+        file_path=file_key,
         status=DocumentStatus.uploaded,
     )
     db.add(doc)
@@ -133,12 +130,10 @@ def delete_document(document_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Không tìm thấy document.")
     # Dọn Qdrant points trước, sau đó xoá DB (cascade xoá pages/chunks).
     qdrant_service.delete_by_document(document_id)
-    # Xoá file PDF gốc (best-effort).
-    try:
-        if doc.file_path and os.path.exists(doc.file_path):
-            os.remove(doc.file_path)
-    except OSError:
-        pass
+    # Xoá blob PDF gốc + ảnh page qua storage_service (best-effort, đã nuốt lỗi bên trong).
+    if doc.file_path:
+        storage_service.delete_prefix(doc.file_path)
+    storage_service.delete_prefix(f"images/{document_id}/")
     db.delete(doc)
     db.commit()
     return None
