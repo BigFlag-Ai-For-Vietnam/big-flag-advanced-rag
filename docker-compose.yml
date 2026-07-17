@@ -19,7 +19,8 @@ services:
       DB_URL: sqlite:////data/rag.db
       DATA_DIR: /data
     volumes:
-      - backend_data:/data
+      # bind mount: db + PDF gốc + ảnh page nằm trực tiếp trong ./backend/data trên host
+      - ./backend/data:/data
     depends_on:
       - qdrant
 
@@ -35,4 +36,3 @@ services:
 
 volumes:
   qdrant_data:
-  backend_data:

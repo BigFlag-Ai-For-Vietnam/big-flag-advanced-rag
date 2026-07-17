@@ -9,9 +9,10 @@ venv/
 .pytest_cache/
 
 # data & storage
-data/
-backend/data/
-*.db
+# data/
+# backend/data/
+# *.db
+images/
 
 # node / vite
 node_modules/

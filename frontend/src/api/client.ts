@@ -64,4 +64,13 @@ export async function reprocessDocument(id: string): Promise<void> {
   await api.post(`/api/documents/${id}/reprocess`);
 }
 
+export async function getHealth(): Promise<boolean> {
+  try {
+    const { data } = await api.get("/api/health", { timeout: 4000 });
+    return data?.status === "ok";
+  } catch {
+    return false;
+  }
+}
+
 export const API_BASE_URL = BASE_URL;
