@@ -1,13 +1,15 @@
 """Router documents: upload / list / detail / delete / reprocess / status."""
 from __future__ import annotations
 
+import json
 import os
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.catalog_presets import resolve_focus_entities
 from app.db import get_db
 from app.models import Chunk, Document, DocumentStatus
 from app.schemas.document import (
@@ -19,6 +21,21 @@ from app.schemas.document import (
 from app.services import pipeline, qdrant_service, storage_service
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+
+
+def _parse_focus_entities(raw: str | None) -> list[str] | None:
+    """focus_entities gửi từ form: chấp nhận JSON list, hoặc phân tách bằng xuống dòng/;/,."""
+    if not raw or not raw.strip():
+        return None
+    raw = raw.strip()
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [str(x).strip() for x in data if str(x).strip()]
+    except json.JSONDecodeError:
+        pass
+    parts = [p.strip() for p in raw.replace(";", "\n").replace(",", "\n").split("\n")]
+    return [p for p in parts if p] or None
 
 
 def _chunk_count(db: Session, document_id: str) -> int:
@@ -37,6 +54,8 @@ def _to_summary(db: Session, doc: Document) -> DocumentSummary:
 async def upload_document(
     background: BackgroundTasks,
     file: UploadFile,
+    category: str | None = Form(None),
+    focus_entities: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     if not (file.filename or "").lower().endswith(".pdf"):
@@ -47,12 +66,17 @@ async def upload_document(
     # theo backend (local: {data_dir}/{key}, s3: object key trong bucket).
     file_key = storage_service.put_bytes(f"uploads/{document_id}.pdf", await file.read())
 
+    # Chốt focus-entities cho catalog: custom (user nhập) > preset theo category > mặc định.
+    resolved_entities = resolve_focus_entities(category, _parse_focus_entities(focus_entities))
+
     doc = Document(
         id=document_id,
         title=os.path.splitext(file.filename)[0],
         original_filename=file.filename,
         file_path=file_key,
         status=DocumentStatus.uploaded,
+        category=category,
+        focus_entities=resolved_entities,
     )
     db.add(doc)
     db.commit()

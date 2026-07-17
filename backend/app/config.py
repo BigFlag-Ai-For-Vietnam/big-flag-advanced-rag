@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # -> rẻ, nhanh, output ổn định. Truyền qua extra_body chat_template_kwargs.enable_thinking.
     fpt_disable_thinking: bool = True
     contextual_max_tokens: int = 500   # token tối đa cho câu định vị (contextual chunking)
+    catalog_max_tokens: int = 1500     # token tối đa cho cây entities (catalog) mỗi đơn vị
+    # Nguồn build catalog:
+    #  - "chunks" (mặc định): trích từ final_content (đã contextual) — mỗi mảnh self-contained
+    #    nhờ câu định vị, gán facet đúng kể cả khi section kéo dài qua nhiều trang / không header.
+    #  - "pages": trích từ parsed_text từng trang — giữ heading/layout gốc.
+    catalog_source: str = "chunks"
 
     # Giới hạn gọi API ngoài
     llm_timeout: float = 120.0
