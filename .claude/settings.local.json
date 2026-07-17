@@ -6,7 +6,10 @@
       "PowerShell(\"---node---\")",
       "PowerShell(\"---npm---\")",
       "PowerShell(\"---docker---\")",
-      "WebSearch"
+      "WebSearch",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; cd C:\\\\Users\\\\Admin\\\\Desktop\\\\big-flag-repository\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-big-flag-repository\\\\8ffc25d8-3a04-4d25-b812-c0fa3e31a06a\\\\scratchpad\\\\verify_e2e.py\")",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; cd C:\\\\Users\\\\Admin\\\\Desktop\\\\big-flag-repository\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-big-flag-repository\\\\8ffc25d8-3a04-4d25-b812-c0fa3e31a06a\\\\scratchpad\\\\dump_chunks.py\")",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; cd C:\\\\Users\\\\Admin\\\\Desktop\\\\big-flag-repository\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-big-flag-repository\\\\8ffc25d8-3a04-4d25-b812-c0fa3e31a06a\\\\scratchpad\\\\probe_nothink.py\")"
     ]
   }
 }

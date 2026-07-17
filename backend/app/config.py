@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     fpt_embed_model: str = ""        # ID model embedding
     embed_dim: int = 1024            # PHẢI khớp số chiều vector của model embedding thực tế
     fpt_enable_prompt_cache: bool = False
+    # GLM-5.x là model reasoning: mặc định "nghĩ" trước khi trả lời, ngốn hết token budget
+    # và trả content rỗng nếu max_tokens thấp. Tắt thinking cho tác vụ RAG (contextual + QA)
+    # -> rẻ, nhanh, output ổn định. Truyền qua extra_body chat_template_kwargs.enable_thinking.
+    fpt_disable_thinking: bool = True
+    contextual_max_tokens: int = 500   # token tối đa cho câu định vị (contextual chunking)
 
     # Giới hạn gọi API ngoài
     llm_timeout: float = 120.0

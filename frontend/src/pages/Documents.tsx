@@ -72,7 +72,7 @@ export default function DocumentsPage() {
           <h4>Chunks ({detail.chunks.length}) — final_content</h4>
           {detail.chunks.map((c) => (
             <details key={c.id}>
-              <summary>Chunk #{c.chunk_index} ({c.token_count} tokens)</summary>
+              <summary>Chunk #{c.chunk_index} ({c.raw_text.length} ký tự / ~{c.token_count} từ)</summary>
               <div className="muted">Câu định vị: {c.contextual_prefix || "(none)"}</div>
               <pre>{c.final_content}</pre>
             </details>
