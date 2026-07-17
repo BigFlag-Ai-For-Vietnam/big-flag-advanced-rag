@@ -14,13 +14,29 @@ services:
     env_file:
       - .env
     environment:
-      # override cho môi trường container (qdrant reachable qua service name)
+      # override cho môi trường container (qdrant/retrieval-mcp reachable qua service name)
       QDRANT_URL: http://qdrant:6333
       DB_URL: sqlite:////data/rag.db
       DATA_DIR: /data
+      RETRIEVAL_MCP_URL: http://retrieval-mcp:8100/mcp
     volumes:
       # bind mount: db + PDF gốc + ảnh page nằm trực tiếp trong ./backend/data trên host
       - ./backend/data:/data
+    depends_on:
+      - qdrant
+      - retrieval-mcp
+
+  retrieval-mcp:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.mcp
+    ports:
+      - "8100:8100"
+    env_file:
+      - .env
+    environment:
+      # override cho môi trường container (qdrant reachable qua service name)
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       - qdrant
 

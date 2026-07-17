@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
+from app.retrieval.mcp import client as retrieval_client
 from app.schemas.playground import Citation, QueryRequest, QueryResponse
-from app.services import embedding_service, llm_client, qdrant_service
+from app.services import llm_client
 
 router = APIRouter(prefix="/api/playground", tags=["playground"])
 logger = logging.getLogger("playground")
@@ -19,22 +20,6 @@ SYSTEM_PROMPT = (
     "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
     "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
 )
-
-
-def _retrieve(question: str, top_k: int):
-    query_vec = embedding_service.embed_query(question)
-    hits = qdrant_service.search(query_vec, top_k)
-    citations = [
-        Citation(
-            document_id=h["payload"].get("document_id", ""),
-            title=h["payload"].get("title", ""),
-            chunk_index=h["payload"].get("chunk_index", -1),
-            score=h["score"],
-            final_content=h["payload"].get("final_content", ""),
-        )
-        for h in hits
-    ]
-    return citations
 
 
 def _build_messages(question: str, citations: list[Citation]) -> list[dict]:
@@ -53,11 +38,13 @@ def _build_messages(question: str, citations: list[Citation]) -> list[dict]:
 
 
 @router.post("/query", response_model=QueryResponse)
-def query(req: QueryRequest):
+async def query(req: QueryRequest):
     if not settings.fpt_chat_model or not settings.fpt_embed_model:
         raise HTTPException(status_code=503, detail="Chưa cấu hình FPT_CHAT_MODEL / FPT_EMBED_MODEL.")
 
-    citations = _retrieve(req.question, req.top_k)
+    # Retrieval Engine chạy như service riêng — gọi đúng 1 lần qua MCP, không tự làm
+    # thêm orchestration (embed/search) ở đây nữa.
+    citations = await retrieval_client.retrieve(req.question, req.top_k)
     messages = _build_messages(req.question, citations)
 
     if req.stream:

@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
+    # --- Retrieval Engine (LangGraph + MCP) ---
+    # URL của MCP server (Retrieval Engine), chạy như service riêng — xem docker-compose.yml.
+    retrieval_mcp_url: str = "http://localhost:8100/mcp"
+    # Số bước lặp tối đa của ReAct subgraph (agent<->tools) — chặn loop vô hạn/tốn phí.
+    retrieval_agent_max_steps: int = 6
+    # Bật/tắt từng node deterministic (normalize/rewrite/rerank) để so sánh ảnh hưởng —
+    # tắt (false) khiến node tương ứng thành no-op/passthrough, không đổi shape của graph.
+    retrieval_enable_normalize: bool = True
+    retrieval_enable_rewrite: bool = True
+    retrieval_enable_rerank: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

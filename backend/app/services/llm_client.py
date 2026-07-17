@@ -126,6 +126,58 @@ def chat(
     return (resp.choices[0].message.content or "").strip()
 
 
+def chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    model: str | None = None,
+    tool_choice: str = "auto",
+    disable_thinking: bool | None = None,
+    temperature: float = 0.0,
+    max_tokens: int | None = 1024,
+    tag: str = "chat_tools",
+):
+    """Gọi chat completion có tool-calling (dùng cho ReAct subgraph của Retrieval Engine).
+
+    Khác chat(): trả về nguyên message object của OpenAI SDK (có cả .content lẫn
+    .tool_calls) thay vì chỉ text, vì phía gọi (LangGraph) cần biết model có yêu cầu
+    gọi tool nào không, không chỉ nội dung trả lời.
+    """
+    model = model or settings.fpt_chat_model
+    if not model:
+        raise LLMError("FPT_CHAT_MODEL chưa được cấu hình (.env).")
+    if disable_thinking is None:
+        disable_thinking = settings.fpt_disable_thinking
+
+    extra_body = _thinking_extra(disable_thinking)
+    client = _client()
+
+    def _call(eb):
+        kwargs = dict(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if eb:
+            kwargs["extra_body"] = eb
+        return client.chat.completions.create(**kwargs)
+
+    try:
+        resp = _call(extra_body)
+    except Exception as exc:  # noqa: BLE001
+        if _is_unsupported_param_error(exc):
+            logger.warning("enable_thinking không hỗ trợ (tools), fallback không extra_body: %s", exc)
+            resp = _call(None)
+        else:
+            raise LLMError(f"chat_with_tools() lỗi: {exc}") from exc
+
+    _log_usage(tag, resp)
+    return resp.choices[0].message
+
+
 def chat_stream(
     messages: list[dict],
     *,
