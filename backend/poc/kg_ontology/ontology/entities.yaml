@@ -1,0 +1,440 @@
+entity_types:
+  VanBan:
+    description: Một văn bản pháp lý/quyết định cụ thể (Nghị định, Thông tư, Quyết định nội bộ)
+    attributes:
+    - so_hieu
+    - loai
+    - cap
+    - ngay_ban_hanh
+    - hieu_luc_tu
+    - trang_thai
+  KhaiNiem:
+    description: Khái niệm/chủ đề tuân thủ dùng chung xuyên nhiều văn bản (vd Mật khẩu, MFA, Dữ liệu cá
+      nhân, KYC)
+  GiaTriQuyDinh:
+    description: Một giá trị/ngưỡng/quy định CỤ THỂ mà 1 văn bản gán cho 1 khái niệm (vd '12 ký tự', '15
+      phút', '10 năm')
+known_entities:
+  documents:
+  - code: ND88
+    pdf_stem: 01_ND_88_2024_NDCP_bao_ve_du_lieu_ca_nhan
+    so_hieu: 88/2024/NĐ-CP
+    loai: Nghị định
+    cap: Nhà nước (Chính phủ)
+    ngay_bh: 15/10/2024
+    hieu_luc_tu: 01/01/2025
+    trang_thai: Còn hiệu lực
+  - code: TT09
+    pdf_stem: 02_TT_09_2024_TT-NHNN_an_toan_he_thong_thong_tin
+    so_hieu: 09/2024/TT-NHNN
+    loai: Thông tư
+    cap: Nhà nước (NHNN)
+    ngay_bh: 20/05/2024
+    hieu_luc_tu: 01/07/2024
+    trang_thai: Còn hiệu lực
+  - code: TT04
+    pdf_stem: 03_TT_04_2025_TT-NHNN_quan_ly_rui_ro_AI
+    so_hieu: 04/2025/TT-NHNN
+    loai: Thông tư
+    cap: Nhà nước (NHNN)
+    ngay_bh: 28/03/2025
+    hieu_luc_tu: 01/06/2025
+    trang_thai: Còn hiệu lực
+  - code: QD215
+    pdf_stem: 04_QD_215_2022_QD-DDB_ATTT_v1_BI_THAY_THE
+    so_hieu: 215/2022/QĐ-DDB
+    loai: Quyết định
+    cap: Nội bộ DDB
+    ngay_bh: 10/03/2022
+    hieu_luc_tu: 10/03/2022
+    trang_thai: BỊ THAY THẾ (một phần)
+  - code: QD342
+    pdf_stem: 05_QD_342_2024_QD-DDB_ATTT_v2
+    so_hieu: 342/2024/QĐ-DDB
+    loai: Quyết định
+    cap: Nội bộ DDB
+    ngay_bh: 15/08/2024
+    hieu_luc_tu: 01/09/2024
+    trang_thai: Còn hiệu lực (bản hiện hành ATTT)
+  - code: QD401
+    pdf_stem: 06_QD_401_2024_QD-DDB_lam_viec_tu_xa
+    so_hieu: 401/2024/QĐ-DDB
+    loai: Quyết định
+    cap: Nội bộ DDB
+    ngay_bh: 12/11/2024
+    hieu_luc_tu: 01/12/2024
+    trang_thai: Còn hiệu lực
+  - code: QD455
+    pdf_stem: 07_QD_455_2025_QD-DDB_bao_ve_du_lieu_khach_hang
+    so_hieu: 455/2025/QĐ-DDB
+    loai: Quyết định
+    cap: Nội bộ DDB
+    ngay_bh: 20/02/2025
+    hieu_luc_tu: 01/03/2025
+    trang_thai: Còn hiệu lực
+  - code: QD502
+    pdf_stem: 08_QD_502_2025_QD-DDB_su_dung_AI_noi_bo
+    so_hieu: 502/2025/QĐ-DDB
+    loai: Quyết định
+    cap: Nội bộ DDB
+    ngay_bh: 15/05/2025
+    hieu_luc_tu: 01/06/2025
+    trang_thai: Còn hiệu lực
+  - code: TT20
+    pdf_stem: 09_TT_20_2024_TT-NHNN_phong_chong_rua_tien
+    so_hieu: 20/2024/TT-NHNN
+    loai: Thông tư
+    cap: Nhà nước (NHNN)
+    ngay_bh: 30/07/2024
+    hieu_luc_tu: 01/09/2024
+    trang_thai: Còn hiệu lực
+  - code: QD480
+    pdf_stem: 10_QD_480_2025_QD-DDB_KYC_phong_chong_rua_tien
+    so_hieu: 480/2025/QĐ-DDB
+    loai: Quyết định
+    cap: Nội bộ DDB
+    ngay_bh: 10/04/2025
+    hieu_luc_tu: 01/05/2025
+    trang_thai: Còn hiệu lực
+  concepts:
+  - name: Mật khẩu
+    xuat_hien_tai:
+    - QD215
+    - QD342
+    - QD401
+    ghi_chu: giá trị mâu thuẫn (xem CONFLICTS)
+    catalog_seen_in:
+    - doc: QD215
+      matched_words:
+      - mật
+      - khẩu
+    - doc: QD342
+      matched_words:
+      - mật
+      - khẩu
+    - doc: QD401
+      matched_words:
+      - mật
+      - khẩu
+  - name: Xác thực đa yếu tố (MFA)
+    xuat_hien_tai:
+    - TT09
+    - QD215
+    - QD342
+    - QD401
+    ghi_chu: QĐ215 "khuyến khích" -> QĐ342 "bắt buộc" (theo TT09)
+    catalog_seen_in:
+    - doc: TT09
+      matched_words:
+      - xác
+      - thực
+      - yếu
+    - doc: QD215
+      matched_words:
+      - xác
+      - thực
+      - yếu
+    - doc: QD342
+      matched_words:
+      - xác
+      - thực
+      - yếu
+    - doc: QD401
+      matched_words:
+      - xác
+      - thực
+  - name: Nhật ký / Log
+    xuat_hien_tai:
+    - TT09
+    - QD215
+    - QD342
+    ghi_chu: 6 tháng (215) -> 12 tháng (342, khớp TT09)
+    catalog_seen_in: []
+  - name: Khóa phiên (session timeout)
+    xuat_hien_tai:
+    - QD215
+    - QD342
+    - QD401
+    ghi_chu: 15' nội bộ vs 30' từ xa
+    catalog_seen_in:
+    - doc: QD215
+      matched_words:
+      - khóa
+      - phiên
+    - doc: QD342
+      matched_words:
+      - khóa
+      - phiên
+    - doc: QD401
+      matched_words:
+      - khóa
+      - phiên
+  - name: Hệ thống thông tin trọng yếu
+    xuat_hien_tai:
+    - TT09
+    - QD215
+    - QD342
+    ghi_chu: Cấp độ 3+ (TT09), Phụ lục 02 (QĐ215) — link supersession một phần
+    catalog_seen_in:
+    - doc: TT09
+      matched_words:
+      - thống
+      - thông
+      - tin
+      - trọng
+      - yếu
+    - doc: QD215
+      matched_words:
+      - thống
+      - thông
+      - tin
+      - trọng
+      - yếu
+    - doc: QD342
+      matched_words:
+      - thống
+      - thông
+      - tin
+      - yếu
+  - name: Phân loại cấp độ hệ thống (1-5)
+    xuat_hien_tai:
+    - TT09
+    ghi_chu: 'Điều 3 (bảng): core banking = Cấp độ 4'
+    catalog_seen_in:
+    - doc: TT09
+      matched_words:
+      - phân
+      - loại
+      - cấp
+      - thống
+  - name: Dữ liệu cá nhân
+    xuat_hien_tai:
+    - ND88
+    - TT09
+    - TT04
+    - QD401
+    - QD455
+    - QD502
+    - QD480
+    ghi_chu: entity trung tâm liên kết Nhà nước<->nội bộ
+    catalog_seen_in:
+    - doc: ND88
+      matched_words:
+      - liệu
+      - nhân
+    - doc: TT04
+      matched_words:
+      - liệu
+      - nhân
+    - doc: QD401
+      matched_words:
+      - liệu
+      - nhân
+    - doc: QD455
+      matched_words:
+      - liệu
+      - nhân
+    - doc: QD502
+      matched_words:
+      - liệu
+      - nhân
+  - name: Sự đồng ý (consent)
+    xuat_hien_tai:
+    - ND88
+    - TT04
+    - QD455
+    ghi_chu: mấu chốt xung đột huấn luyện AI
+    catalog_seen_in:
+    - doc: ND88
+      matched_words:
+      - đồng
+    - doc: TT04
+      matched_words:
+      - đồng
+    - doc: QD455
+      matched_words:
+      - đồng
+  - name: Huấn luyện mô hình AI
+    xuat_hien_tai:
+    - ND88
+    - TT04
+    - QD455
+    - QD502
+    ghi_chu: mấu chốt xung đột (ND88 Đ9, TT04 Đ9, QĐ455 Đ5, QĐ502 Đ6)
+    catalog_seen_in:
+    - doc: TT04
+      matched_words:
+      - huấn
+      - luyện
+      - hình
+    - doc: QD502
+      matched_words:
+      - huấn
+      - luyện
+      - hình
+  - name: Phân loại rủi ro AI (4 mức)
+    xuat_hien_tai:
+    - TT04
+    - QD502
+    ghi_chu: 'TT04 Đ3 (bảng), QĐ502 Đ9: chấm điểm tín dụng = rủi ro Cao'
+    catalog_seen_in:
+    - doc: QD502
+      matched_words:
+      - phân
+      - loại
+      - rủi
+  - name: Human-in-the-loop / quyết định tín dụng
+    xuat_hien_tai:
+    - TT04
+    - QD502
+    ghi_chu: overlap ĐỒNG NHẤT (không xung đột), TT04 Đ7 <-> QĐ502 Đ4
+    catalog_seen_in:
+    - doc: TT04
+      matched_words:
+      - quyết
+      - định
+      - tín
+      - dụng
+    - doc: QD502
+      matched_words:
+      - quyết
+      - định
+      - tín
+      - dụng
+  - name: Mã hóa
+    xuat_hien_tai:
+    - ND88
+    - TT09
+    - QD342
+    - QD401
+    - QD455
+    ghi_chu: 'tiêu chuẩn cụ thể: AES-256, TLS 1.2 (QĐ342 Đ7 bảng)'
+    catalog_seen_in:
+    - doc: ND88
+      matched_words:
+      - hóa
+    - doc: TT09
+      matched_words:
+      - hóa
+    - doc: QD342
+      matched_words:
+      - hóa
+    - doc: QD401
+      matched_words:
+      - hóa
+  - name: Ẩn danh (anonymization)
+    xuat_hien_tai:
+    - TT04
+    - QD502
+    ghi_chu: TT04 Đ9.2, QĐ502 Đ6 — định nghĩa gây tranh cãi trong xung đột
+    catalog_seen_in:
+    - doc: TT04
+      matched_words:
+      - danh
+    - doc: QD502
+      matched_words:
+      - danh
+  - name: KYC / Nhận biết khách hàng
+    xuat_hien_tai:
+    - TT20
+    - QD480
+    ghi_chu: cặp Nhà nước<->nội bộ mới
+    catalog_seen_in:
+    - doc: TT20
+      matched_words:
+      - kyc
+      - nhận
+      - biết
+      - khách
+      - hàng
+    - doc: QD480
+      matched_words:
+      - nhận
+      - biết
+      - khách
+      - hàng
+  - name: Ngưỡng giao dịch báo cáo
+    xuat_hien_tai:
+    - TT20
+    - QD480
+    ghi_chu: 'TT20 Đ5 (bảng), QĐ480 Đ4 (bảng): tiền mặt >=400tr (NN) / >=300tr (nội bộ)'
+    catalog_seen_in:
+    - doc: TT20
+      matched_words:
+      - ngưỡng
+      - giao
+      - dịch
+      - báo
+      - cáo
+    - doc: QD480
+      matched_words:
+      - ngưỡng
+      - giao
+      - dịch
+      - báo
+      - cáo
+  - name: Dấu hiệu giao dịch đáng ngờ
+    xuat_hien_tai:
+    - TT20
+    - QD480
+    ghi_chu: TT20 Đ6 (8 mục), QĐ480 Đ6 (5 mục)
+    catalog_seen_in:
+    - doc: TT20
+      matched_words:
+      - dấu
+      - hiệu
+      - giao
+      - dịch
+      - đáng
+      - ngờ
+    - doc: QD480
+      matched_words:
+      - hiệu
+      - giao
+      - dịch
+      - đáng
+      - ngờ
+  - name: Thời hạn lưu trữ
+    xuat_hien_tai:
+    - ND88
+    - QD455
+    - QD502
+    - TT20
+    - QD480
+    ghi_chu: '3 mốc khác nhau theo loại dữ liệu: 5 năm (DLCN), 24 tháng (AI), 10 năm (KYC)'
+    catalog_seen_in:
+    - doc: ND88
+      matched_words:
+      - thời
+      - hạn
+      - lưu
+      - trữ
+    - doc: QD455
+      matched_words:
+      - thời
+      - hạn
+      - lưu
+      - trữ
+    - doc: TT20
+      matched_words:
+      - thời
+      - hạn
+      - lưu
+      - trữ
+    - doc: QD480
+      matched_words:
+      - thời
+      - hạn
+      - lưu
+      - trữ
+  - name: Xử phạt vi phạm hành chính
+    xuat_hien_tai:
+    - ND88
+    ghi_chu: 'ND88 Đ14 (bảng): 80-300 triệu theo hành vi'
+    catalog_seen_in:
+    - doc: ND88
+      matched_words:
+      - phạt
+      - phạm
+      - hành
+      - chính

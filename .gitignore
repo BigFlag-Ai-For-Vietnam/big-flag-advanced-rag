@@ -17,6 +17,9 @@ images/
 # eval-rag CLI local scratch output (generate --out-dir default; source of truth is MLflow)
 backend/eval_runs/
 
+# PoC knowledge-graph ontology (backend/poc/kg_ontology): LightRAG working dirs + HTML output
+backend/poc/kg_ontology/_poc_storage/
+
 # Qdrant: KHÔNG commit raw storage (preallocate ~hàng trăm MB). Data đi theo git qua
 # snapshot: chỉ commit file ổn định qdrant_snapshots/rag_chunks.snapshot, bỏ bản
 # timestamped tự sinh + tmp.

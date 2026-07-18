@@ -1,42 +1,16 @@
 """Preset facet-entities theo category tài liệu.
 
-Ý tưởng: mỗi category (Thẻ tín dụng / Bảo hiểm / Quy trình…) có sẵn danh sách
+Ý tưởng: mỗi category (Tuân thủ / Pháp lý / Quy trình…) có sẵn danh sách
 "facet-entities" — các trục thông tin mà LLM cần focus khi sinh CATALOG cho tài liệu.
 User chọn category lúc upload để prefill, và được phép customize (thêm/bớt) danh sách này.
 
-Danh sách dưới đây rút ra từ chính các tài liệu mẫu trong `backend/docs`
-(Thẻ tín dụng Sung Túc / SHBFinance, Bảo hiểm Family, Bảo hiểm Bảo Tâm An + TASCO).
+Tập trung vào domain văn bản tuân thủ/pháp lý (xem `sample_compliance_corpus/`) — đã bỏ
+2 preset thẻ tín dụng/bảo hiểm của bản PoC biểu phí trước đó (không còn phù hợp hướng đi).
 """
 from __future__ import annotations
 
 # key ổn định (dùng trong API/DB) -> {label hiển thị, entities preset}
 CATALOG_PRESETS: dict[str, dict] = {
-    "the_tin_dung": {
-        "label": "Thẻ tín dụng",
-        "entities": [
-            "Định nghĩa & thuật ngữ",
-            "Các loại phí",
-            "Hạn mức (tín dụng, giao dịch, rút tiền)",
-            "Lãi suất, kỳ sao kê & thanh toán",
-            "Quyền lợi & ưu đãi",
-            "Quyền & nghĩa vụ của chủ thẻ",
-            "Điều kiện phát hành & sử dụng",
-            "An toàn, bảo mật & xử lý tranh chấp",
-        ],
-    },
-    "bao_hiem": {
-        "label": "Bảo hiểm",
-        "entities": [
-            "Đối tượng & điều kiện tham gia",
-            "Phạm vi bảo hiểm",
-            "Quyền lợi bảo hiểm (chính & bổ sung)",
-            "Điều kiện loại trừ",
-            "Số tiền bảo hiểm & phí bảo hiểm",
-            "Hồ sơ & thủ tục bồi thường",
-            "Thời hạn & hiệu lực hợp đồng",
-            "Định nghĩa & thuật ngữ",
-        ],
-    },
     "quy_trinh": {
         "label": "Quy trình / Hướng dẫn",
         "entities": [
@@ -55,6 +29,19 @@ CATALOG_PRESETS: dict[str, dict] = {
             "Các mục / phần chính",
             "Số liệu & điều kiện quan trọng",
             "Định nghĩa & thuật ngữ",
+        ],
+    },
+    "tuan_thu": {
+        "label": "Tuân thủ / Pháp lý",
+        "entities": [
+            "Căn cứ pháp lý",
+            "Đối tượng & phạm vi áp dụng",
+            "Định nghĩa & thuật ngữ",
+            "Quy định cụ thể (giá trị/ngưỡng)",
+            "Điều khoản chuyển tiếp & thay thế",
+            "Quyền & nghĩa vụ",
+            "Chế tài xử phạt",
+            "Điều khoản thi hành",
         ],
     },
 }
