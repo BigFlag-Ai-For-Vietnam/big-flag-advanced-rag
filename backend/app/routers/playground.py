@@ -176,7 +176,7 @@ async def query(req: QueryRequest, request: Request, db: Session = Depends(get_d
         with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
             answer = llm_client.chat(
                 _build_messages(req.question, citations, catalogs, coverage, graph_facts),
-                temperature=0.2, max_tokens=4096, tag="qa",
+                temperature=0.2, max_tokens=20000, tag="qa",
             )
             tracing.set_outputs(gen, {"answer_chars": len(answer)})
         tracing.set_outputs(
