@@ -92,6 +92,16 @@ ASSESS_PROMPT = (
     "- satisfied=false CHỈ khi CẢ 2 loại đều hầu như KHÔNG liên quan hoặc thiếu hẳn thông tin "
     "cốt lõi. Khi false, note nêu ngắn gọn còn thiếu gì để lần tìm sau nhắm đúng.\n"
     "Ưu tiên dừng (true) khi đã đủ dùng — tránh tìm lặp vô ích.\n"
+    "NGOẠI LỆ (xét TRƯỚC quy tắc ưu tiên dừng): nếu BẰNG CHỨNG ĐỒ THỊ cho thấy có văn bản "
+    "khác được THAY_THE / UU_TIEN_HON / CAN_CU / THAM_CHIEU tới sub-goal này, MÀ nội dung "
+    "của văn bản đó KHÔNG xuất hiện trong bằng chứng văn bản, thì đặt satisfied=false — kể "
+    "cả khi bằng chứng văn bản hiện có trông đã đủ. Lý do: trả lời bằng điều khoản đã bị "
+    "thay thế/chưa xét văn bản căn cứ là SAI, không phải thiếu.\n"
+    "Khi rơi vào ngoại lệ này, note PHẢI nêu ĐÍCH DANH tên văn bản còn thiếu, viết dưới dạng "
+    "CỤM TỪ TÌM KIẾM ngắn (tên văn bản + khía cạnh cần tra), KHÔNG viết câu giải thích dài — "
+    "note sẽ được ghép thẳng vào truy vấn tìm kiếm ở vòng sau.\n"
+    'Ví dụ note đúng: "Thông tư 22/2019/TT-NHNN tỷ lệ an toàn vốn"; '
+    'note SAI: "cần tìm thêm nội dung của văn bản đã thay thế điều khoản này".\n'
     "CHỈ trả về JSON đúng schema, không giải thích: "
     '{"results":[{"id":"<id>","satisfied":true,"note":"..."}]}'
 )

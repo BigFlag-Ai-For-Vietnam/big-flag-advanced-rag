@@ -26,6 +26,8 @@ services:
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "${NGINX_HTTPS_PORT:-443}:443"
+      # Bolt-over-WebSocket có TLS cho Neo4j Browser (xem server block trong nginx/app.conf).
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
     volumes:
       - ./nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
       - nginx_certs:/etc/nginx/certs:ro
@@ -67,9 +69,13 @@ services:
   neo4j:
     image: neo4j:5-community
     restart: unless-stopped
+    # Bolt (7687) KHÔNG publish thẳng ra host nữa: nginx chiếm cổng 7687 để terminate TLS
+    # (host chỉ bind được 1 chỗ). Trong network rag-infra, backend/retrieval-mcp và chính
+    # nginx vẫn gọi neo4j:7687 bình thường. 7474 giữ nguyên (nguồn cho Browser UI qua 443).
     ports:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
-      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    expose:
+      - "7687"
     environment:
       NEO4J_AUTH: "${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-changeme123}"
     volumes:
