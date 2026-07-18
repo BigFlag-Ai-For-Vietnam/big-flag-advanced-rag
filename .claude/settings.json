@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; $env:PYTHONUTF8=\"1\"; cd \"c:\\\\Users\\\\Admin\\\\Desktop\\\\big-flag-repository\\\\backend\"; & \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python310\\\\python.exe\" -m pytest tests/test_catalog.py -q 2>&1 | Select-Object -Last 30)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; $env:PYTHONUTF8=\"1\"; & \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python310\\\\python.exe\" \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-big-flag-repository\\\\ec53e462-fb08-4e5c-905f-fde2d1567241\\\\scratchpad\\\\dump_cat2.py\")",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; $env:PYTHONUTF8=\"1\"; & \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python310\\\\python.exe\" \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-big-flag-repository\\\\ec53e462-fb08-4e5c-905f-fde2d1567241\\\\scratchpad\\\\dump_tree.py\")"
+    ]
+  }
+}
