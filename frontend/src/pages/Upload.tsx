@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, ArrowRight, RotateCcw } from "lucide-react";
-import { getStatus, uploadDocument, type DocStatus } from "../api/client";
+import { Sparkles, ArrowRight, RotateCcw, Tags } from "lucide-react";
+import {
+  getCatalogPresets,
+  getStatus,
+  uploadDocument,
+  type CatalogPreset,
+  type DocStatus,
+} from "../api/client";
 import { STATUS_META } from "../lib/status";
 import Dropzone from "../components/Dropzone";
 import PipelineStepper from "../components/PipelineStepper";
@@ -9,6 +15,9 @@ import { useToast } from "../lib/toast";
 import { cn } from "../lib/cn";
 
 const TERMINAL: DocStatus[] = ["indexed", "failed"];
+
+// Chuyển textarea (mỗi dòng 1 facet) <-> mảng.
+const linesToList = (t: string) => t.split("\n").map((s) => s.trim()).filter(Boolean);
 
 export default function UploadPage() {
   const nav = useNavigate();
@@ -19,6 +28,30 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
+
+  // Catalog config: category preset + danh sách facet-entities (sửa được).
+  const [presets, setPresets] = useState<CatalogPreset[]>([]);
+  const [category, setCategory] = useState<string>("");
+  const [entitiesText, setEntitiesText] = useState<string>("");
+
+  useEffect(() => {
+    getCatalogPresets()
+      .then((ps) => {
+        setPresets(ps);
+        if (ps.length) {
+          setCategory(ps[0].key);
+          setEntitiesText(ps[0].entities.join("\n"));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const onCategoryChange = (key: string) => {
+    setCategory(key);
+    const preset = presets.find((p) => p.key === key);
+    // prefill facet-entities theo preset (user vẫn sửa được sau đó)
+    if (preset) setEntitiesText(preset.entities.join("\n"));
+  };
 
   useEffect(() => () => void (timer.current && window.clearInterval(timer.current)), []);
 
@@ -46,7 +79,10 @@ export default function UploadPage() {
     setError(null);
     setStatus(null);
     try {
-      const doc = await uploadDocument(file);
+      const doc = await uploadDocument(file, {
+        category: category || null,
+        focusEntities: linesToList(entitiesText),
+      });
       setDocId(doc.id);
       setStatus(doc.status);
       toast.push("info", "Đã tải lên, pipeline bắt đầu chạy…");
@@ -84,6 +120,41 @@ export default function UploadPage() {
         <section className="lg:col-span-3">
           <div className="rounded-2xl border bg-surface p-5 shadow-sm">
             <Dropzone file={file} onFile={setFile} disabled={busy || (!!status && !done && status !== "failed")} />
+
+            {/* Catalog config: category + facet-entities (dùng để sinh catalog) */}
+            <div className="mt-5 border-t pt-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-fg">
+                <Tags className="size-4 text-accent" /> Loại tài liệu & facet cần tách
+              </div>
+              <label className="mb-3 block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">Loại tài liệu (preset)</span>
+                <select
+                  value={category}
+                  onChange={(e) => onCategoryChange(e.target.value)}
+                  disabled={busy}
+                  className="w-full rounded-lg border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+                >
+                  {presets.map((p) => (
+                    <option key={p.key} value={p.key}>{p.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-muted">
+                  Facet-entities LLM cần focus (mỗi dòng 1 facet — sửa tuỳ ý)
+                </span>
+                <textarea
+                  value={entitiesText}
+                  onChange={(e) => setEntitiesText(e.target.value)}
+                  disabled={busy}
+                  rows={6}
+                  className="scrollbar-thin w-full resize-y rounded-lg border bg-surface px-3 py-2 text-sm leading-relaxed text-fg outline-none focus:border-accent"
+                />
+              </label>
+              <p className="mt-1.5 text-xs text-faint">
+                Catalog sinh từ các facet này (chỉ tên mục, không có số liệu) sẽ đính vào tài liệu để agent trả lời chính xác hơn.
+              </p>
+            </div>
 
             <div className="mt-4 flex items-center gap-3">
               <button

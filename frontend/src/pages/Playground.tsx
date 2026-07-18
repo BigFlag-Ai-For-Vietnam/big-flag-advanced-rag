@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { Send, Sparkles, Quote, FileText } from "lucide-react";
-import { API_BASE_URL, type Citation } from "../api/client";
+import { Send, Sparkles, Quote, FileText, Network } from "lucide-react";
+import { API_BASE_URL, type CatalogInfo, type Citation } from "../api/client";
 import { cn } from "../lib/cn";
+import CatalogTree from "../components/CatalogTree";
 
 const SUGGESTIONS = [
   "Quyền lợi bảo hiểm chính là gì?",
@@ -14,6 +15,7 @@ export default function PlaygroundPage() {
   const [topK, setTopK] = useState(5);
   const [answer, setAnswer] = useState("");
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [catalogs, setCatalogs] = useState<CatalogInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +28,7 @@ export default function PlaygroundPage() {
     setAsked(query);
     setAnswer("");
     setCitations([]);
+    setCatalogs([]);
     setError(null);
     streaming.current = true;
 
@@ -54,6 +57,7 @@ export default function PlaygroundPage() {
           try {
             const evt = JSON.parse(data);
             if (evt.type === "citations") setCitations(evt.citations);
+            else if (evt.type === "catalogs") setCatalogs(evt.catalogs);
             else if (evt.type === "token") setAnswer((p) => p + evt.content);
             else if (evt.type === "error") setError(evt.message);
           } catch {
@@ -157,6 +161,30 @@ export default function PlaygroundPage() {
               </div>
             )}
           </div>
+
+          {/* Catalog (bản đồ mục lục agent dùng để đánh giá độ đầy đủ) */}
+          {catalogs.length > 0 && (
+            <div>
+              <p className="mb-2.5 flex items-center gap-2 text-sm font-semibold text-fg">
+                <Network className="size-4 text-accent" /> Catalog tài liệu ({catalogs.length})
+              </p>
+              <div className="space-y-2.5">
+                {catalogs.map((cat) => (
+                  <details key={cat.document_id} className="rounded-xl border bg-surface shadow-sm">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-fg">
+                      {cat.title}
+                      <span className="ml-2 font-mono text-xs text-faint">
+                        {cat.catalog.tree.length} facet
+                      </span>
+                    </summary>
+                    <div className="border-t px-4 py-3">
+                      <CatalogTree nodes={cat.catalog.tree} />
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Citations */}
           {citations.length > 0 && (

@@ -294,22 +294,10 @@ def cmd_judge(args: argparse.Namespace) -> int:
     # FR-12 (r3): tag technique + breakdown theo tier/persona — mlflow.genai.evaluate() tự
     # log điểm tổng hợp + assessment lên trace, nhưng không tự tag technique hay slice theo
     # synthesizer_name/persona_name (T26).
-    from eval.judge_logging import breakdowns, log_run_metadata
+    from eval.judge_logging import breakdowns, log_run_metadata, rows_from_traces
 
     scored_traces = mlflow.search_traces(run_id=result.run_id, return_type="list")
-    rows = []
-    for t in scored_traces:
-        info = getattr(t, "info", t)
-        tags = getattr(info, "tags", None) or {}
-        row = {
-            "synthesizer_name": tags.get("synthesizer_name"),
-            "persona_name": tags.get("persona_name"),
-        }
-        for assessment in getattr(info, "assessments", None) or []:
-            value = getattr(assessment, "value", None)
-            if isinstance(value, (int, float)):
-                row[assessment.name] = value
-        rows.append(row)
+    rows = rows_from_traces(scored_traces)
 
     params = {
         "eval_judge_model": settings.eval_judge_model or settings.fpt_chat_model,

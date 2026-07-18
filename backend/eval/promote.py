@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from eval.dataset_upload import EXP_CONTEXTS, EXP_RESPONSE, records_to_jsonl
+
 APPROVE_FEEDBACK = "approve"          # feedback question name (T17 review-queue spec)
 PASS_VALUE = "pass"
-EXP_RESPONSE = "expected_response"     # expectation names ghi bởi T16 silver ingest
-EXP_CONTEXTS = "reference_contexts"
 HUMAN = "HUMAN"
 
 
@@ -76,10 +76,6 @@ class PromoteResult:
     dataset_name: str
     records: list[dict]
     jsonl: str
-
-
-def records_to_jsonl(records: list[dict]) -> str:
-    return "\n".join(json.dumps(r, ensure_ascii=False, sort_keys=True) for r in records)
 
 
 def promote(

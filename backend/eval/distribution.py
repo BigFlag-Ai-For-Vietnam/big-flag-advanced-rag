@@ -62,10 +62,12 @@ def apply_backfill(distribution, availability: list[MultiHopAvailability]):
         return distribution, []
 
     reallocated = 0.0
+    reallocated_weight_by_name: dict[str, float] = {}
     kept: list[list] = []
     for synth, weight in distribution:
         if synth.name in unavailable:
             reallocated += weight
+            reallocated_weight_by_name[synth.name] = weight
         else:
             kept.append([synth, weight])
 
@@ -85,7 +87,7 @@ def apply_backfill(distribution, availability: list[MultiHopAvailability]):
         {
             "synthesizer_name": a.synthesizer_name,
             "num_clusters": a.num_clusters,
-            "reallocated_weight": next(w for s, w in distribution if s.name == a.synthesizer_name),
+            "reallocated_weight": reallocated_weight_by_name[a.synthesizer_name],
         }
         for a in availability if not a.available
     ]

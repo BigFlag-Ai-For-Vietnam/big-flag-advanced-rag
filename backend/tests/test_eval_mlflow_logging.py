@@ -2,8 +2,9 @@
 offline, fake mlflow module qua sys.modules."""
 import math
 import sys
+from types import SimpleNamespace
 
-from eval.judge_logging import breakdowns, log_run_metadata
+from eval.judge_logging import breakdowns, log_run_metadata, rows_from_traces
 
 ROWS = [
     {"synthesizer_name": "single_hop_specific_query_synthesizer", "persona_name": "P1", "faithfulness": 0.8},
@@ -30,6 +31,31 @@ def test_all_nan_slice_omitted():
     result = breakdowns(rows)
     assert "faithfulness/s1" not in result
     assert "faithfulness/persona/p1" not in result
+
+
+def _trace(tags, assessments):
+    return SimpleNamespace(info=SimpleNamespace(tags=tags, assessments=assessments))
+
+
+def _assessment(name, value):
+    return SimpleNamespace(name=name, value=value)
+
+
+def test_rows_from_traces_reads_tags_and_numeric_assessments():
+    traces = [
+        _trace(
+            {"synthesizer_name": "single_hop_specific_query_synthesizer", "persona_name": "P1"},
+            [_assessment("faithfulness", 0.8), _assessment("comment", "looks good")],
+        ),
+        _trace({}, []),  # trace không tag (không thuộc sample có synthesizer/persona) vẫn đọc được
+    ]
+
+    rows = rows_from_traces(traces)
+
+    assert rows == [
+        {"synthesizer_name": "single_hop_specific_query_synthesizer", "persona_name": "P1", "faithfulness": 0.8},
+        {"synthesizer_name": None, "persona_name": None},
+    ]
 
 
 class _FakeMlflow:

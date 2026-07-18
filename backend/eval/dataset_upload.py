@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+EXP_RESPONSE = "expected_response"    # expectation key: câu trả lời tham chiếu (README §3)
+EXP_CONTEXTS = "reference_contexts"   # expectation key: ngữ cảnh tham chiếu — dùng chung với promote.py (T18)
+
 
 def build_records(samples: list[dict]) -> list[dict]:
     """Sample silver (post-gate, dict với user_input/reference/reference_contexts) -> record
@@ -22,8 +25,8 @@ def build_records(samples: list[dict]) -> list[dict]:
                 "persona_name": s.get("persona_name"),
             },
             "expectations": {
-                "expected_response": s.get("reference"),
-                "reference_contexts": s.get("reference_contexts", []),
+                EXP_RESPONSE: s.get("reference"),
+                EXP_CONTEXTS: s.get("reference_contexts", []),
             },
         }
         for s in samples
@@ -31,6 +34,7 @@ def build_records(samples: list[dict]) -> list[dict]:
 
 
 def records_to_jsonl(records: list[dict]) -> str:
+    """Contract JSONL dùng chung bởi đường FR-16 (đây) và FR-8 optional (`promote.py`)."""
     return "\n".join(json.dumps(r, ensure_ascii=False, sort_keys=True) for r in records)
 
 

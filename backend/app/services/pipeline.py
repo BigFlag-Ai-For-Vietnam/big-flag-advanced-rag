@@ -7,9 +7,12 @@ from __future__ import annotations
 import logging
 import uuid
 
+from app.catalog_presets import resolve_focus_entities
+from app.config import settings
 from app.db import SessionLocal
 from app.models import Chunk, Document, DocumentStatus, Page
 from app.services import (
+    catalog_service,
     chunking_service,
     embedding_service,
     parsing_service,
@@ -75,8 +78,11 @@ def run_pipeline(document_id: str) -> None:
                 len(pages),
             )
 
-        # --- B. Chunking + Contextual ---
+        # --- B. Chunking + Contextual, rồi sinh CATALOG lean ---
         _set_status(db, document, DocumentStatus.chunking)
+        focus_entities = document.focus_entities or resolve_focus_entities(document.category, None)
+
+        # Chunk + contextual prefix TRƯỚC (catalog mặc định build từ chunk đã contextual).
         chunk_dicts = chunking_service.build_chunks(document.title, full_text)
         chunk_rows: list[Chunk] = []
         for cd in chunk_dicts:
@@ -91,6 +97,25 @@ def run_pipeline(document_id: str) -> None:
             )
             db.add(row)
             chunk_rows.append(row)
+        db.commit()
+
+        # Catalog document-level (cây entities — chỉ TÊN mục, không có giá trị).
+        # Nguồn: "chunks" (final_content đã contextual — mảnh self-contained nhờ câu định vị,
+        # gán facet đúng kể cả khi section kéo dài qua nhiều trang / trang không header) hoặc
+        # "pages" (parsed_text từng trang). Cấu hình qua CATALOG_SOURCE.
+        if settings.catalog_source == "pages":
+            catalog_units = [p.get("parsed_text") or "" for p in pages]
+            unit_kind = "page"
+        else:
+            catalog_units = [cd["final_content"] for cd in chunk_dicts]
+            unit_kind = "chunk"
+        document.catalog = catalog_service.generate_catalog(
+            document.title,
+            catalog_units,
+            focus_entities,
+            unit_kind=unit_kind,
+            full_text_fallback=full_text,
+        )
         db.commit()
 
         # --- C. Indexing ---
@@ -137,4 +162,5 @@ def _reset_document(db, document: Document) -> None:
     db.query(Chunk).filter(Chunk.document_id == document.id).delete()
     document.error_message = None
     document.page_count = None
+    document.catalog = None
     db.commit()

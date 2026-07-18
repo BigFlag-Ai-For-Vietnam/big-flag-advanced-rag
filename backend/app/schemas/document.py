@@ -33,6 +33,7 @@ class DocumentSummary(BaseModel):
     title: str
     original_filename: str
     status: DocumentStatus
+    category: str | None = None
     page_count: int | None = None
     chunk_count: int = 0
     error_message: str | None = None
@@ -41,8 +42,16 @@ class DocumentSummary(BaseModel):
 
 
 class DocumentDetail(DocumentSummary):
+    focus_entities: list[str] | None = None
+    catalog: dict | None = None
     pages: list[PageOut] = []
     chunks: list[ChunkOut] = []
+
+
+class CatalogPreset(BaseModel):
+    key: str
+    label: str
+    entities: list[str]
 
 
 class DocumentListResponse(BaseModel):

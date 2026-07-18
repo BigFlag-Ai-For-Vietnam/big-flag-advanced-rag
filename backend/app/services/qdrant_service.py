@@ -55,15 +55,28 @@ def upsert_chunks(points: list[dict]) -> None:
     )
 
 
-def search(query_vector: list[float], top_k: int) -> list[dict]:
-    """Trả về list {id, score, payload}."""
+def search(
+    query_vector: list[float],
+    top_k: int,
+    document_ids: list[str] | None = None,
+) -> list[dict]:
+    """Trả về list {id, score, payload}.
+
+    document_ids: nếu có, chỉ tìm trong các document này (agent drill-down cho câu liệt kê).
+    """
     ensure_collection()
     client = _client()
+    query_filter = None
+    if document_ids:
+        query_filter = qm.Filter(
+            must=[qm.FieldCondition(key="document_id", match=qm.MatchAny(any=list(document_ids)))]
+        )
     hits = client.query_points(
         collection_name=settings.qdrant_collection,
         query=query_vector,
         limit=top_k,
         with_payload=True,
+        query_filter=query_filter,
     ).points
     return [{"id": h.id, "score": h.score, "payload": h.payload or {}} for h in hits]
 

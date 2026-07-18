@@ -17,6 +17,13 @@ images/
 # eval-rag CLI local scratch output (generate --out-dir default; source of truth is MLflow)
 backend/eval_runs/
 
+# Qdrant: KHÔNG commit raw storage (preallocate ~hàng trăm MB). Data đi theo git qua
+# snapshot: chỉ commit file ổn định qdrant_snapshots/rag_chunks.snapshot, bỏ bản
+# timestamped tự sinh + tmp.
+qdrant_storage/
+qdrant_snapshots/*
+!qdrant_snapshots/rag_chunks.snapshot
+
 # node / vite
 node_modules/
 dist/

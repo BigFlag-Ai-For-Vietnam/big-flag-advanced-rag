@@ -50,3 +50,26 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _auto_migrate_sqlite()
+
+
+def _auto_migrate_sqlite() -> None:
+    """Migration nhẹ cho SQLite: thêm cột còn thiếu vào bảng documents.
+
+    create_all KHÔNG ALTER bảng đã tồn tại, nên DB cũ (trước khi có catalog) sẽ thiếu
+    category/focus_entities/catalog. Thêm cột ở đây để giữ nguyên dữ liệu + blob cũ,
+    cho phép reprocess tài liệu cũ mà không cần xoá volume. Idempotent.
+    """
+    if not settings.db_url.startswith("sqlite"):
+        return
+    # SQLAlchemy JSON map sang TEXT trong SQLite.
+    new_columns = {
+        "category": "VARCHAR(64)",
+        "focus_entities": "JSON",
+        "catalog": "JSON",
+    }
+    with engine.begin() as conn:
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(documents)")}
+        for col, ddl in new_columns.items():
+            if col not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE documents ADD COLUMN {col} {ddl}")

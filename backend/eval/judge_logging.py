@@ -22,6 +22,26 @@ def _mean_ignore_nan(values: list) -> float | None:
     return sum(clean) / len(clean)
 
 
+def rows_from_traces(traces) -> list[dict]:
+    """Đọc lại trace đã được `mlflow.genai.evaluate()` gắn assessment (điểm) — mỗi trace ->
+    1 row `breakdowns()` cần: tag `synthesizer_name`/`persona_name` (gắn bởi `runner.run()`)
+    + mọi assessment giá trị số (tên metric -> điểm). Tách khỏi `cli.py` để CLI chỉ lo wiring."""
+    rows = []
+    for t in traces:
+        info = getattr(t, "info", t)
+        tags = getattr(info, "tags", None) or {}
+        row = {
+            "synthesizer_name": tags.get("synthesizer_name"),
+            "persona_name": tags.get("persona_name"),
+        }
+        for assessment in getattr(info, "assessments", None) or []:
+            value = getattr(assessment, "value", None)
+            if isinstance(value, (int, float)):
+                row[assessment.name] = value
+        rows.append(row)
+    return rows
+
+
 def breakdowns(rows: list[dict]) -> dict[str, float]:
     """rows: mỗi dict có `synthesizer_name`, `persona_name`, + cột điểm số (tên metric -> float).
     Trả về `{"<metric>/<synthesizer_name>": mean, "<metric>/persona/<persona_name>": mean, ...}`
@@ -59,17 +79,13 @@ def log_run_metadata(
     chính `mlflow.genai.evaluate()` — cần resume qua `start_run(run_id=...)` để log đúng chỗ
     (evaluate() tự đóng run của nó, không còn active khi hàm này chạy). Không truyền -> log
     vào run đang active (dùng trong test/offline)."""
+    import contextlib
+
     import mlflow
 
-    if run_id is not None:
-        with mlflow.start_run(run_id=run_id):
-            _log(mlflow, technique, params, breakdown_metrics)
-        return
-    _log(mlflow, technique, params, breakdown_metrics)
-
-
-def _log(mlflow_mod, technique: str, params: dict, breakdown_metrics: dict[str, float]) -> None:
-    mlflow_mod.log_params(params)
-    mlflow_mod.set_tag("technique", technique)
-    if breakdown_metrics:
-        mlflow_mod.log_metrics(breakdown_metrics)
+    ctx = mlflow.start_run(run_id=run_id) if run_id is not None else contextlib.nullcontext()
+    with ctx:
+        mlflow.log_params(params)
+        mlflow.set_tag("technique", technique)
+        if breakdown_metrics:
+            mlflow.log_metrics(breakdown_metrics)
