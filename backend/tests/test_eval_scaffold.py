@@ -20,20 +20,13 @@ def test_app_main_does_not_import_eval():
 
 
 def test_cli_registers_all_subcommands():
-    from eval.cli import (
-        COMMANDS, build_parser,
-        cmd_generate, cmd_adapt_prompts, cmd_review_queue, cmd_promote, cmd_run,
-    )
-    assert COMMANDS == ("generate", "adapt-prompts", "review-queue", "promote", "run")
-    parser = build_parser()
+    from eval.cli import DATASET_SUBCOMMANDS, TOP_LEVEL_COMMANDS, build_parser
 
-    # All five subcommands are implemented (T09/T17/T18/T14-T15) — verify registration
-    # only; invoking them needs live FPT/DB/MLflow, out of scope for this offline test.
-    assert parser.parse_args(["generate", "--all"]).func is cmd_generate
-    assert parser.parse_args(["adapt-prompts"]).func is cmd_adapt_prompts
-    assert parser.parse_args(["review-queue", "--dataset", "d1"]).func is cmd_review_queue
-    assert parser.parse_args(["promote", "--dataset", "d1"]).func is cmd_promote
-    assert parser.parse_args(["run", "--dataset", "d1"]).func is cmd_run
+    assert TOP_LEVEL_COMMANDS == ("dataset", "judge")
+    assert DATASET_SUBCOMMANDS == ("generate", "adapt-prompts", "review-queue", "promote")
+    build_parser()  # constructs without error, no heavy imports triggered
+    # Behavior of the two-command split (dispatch + legacy-name rejection) is covered by
+    # test_eval_cli.py::test_two_command_split (rev 2, FR-9).
 
 
 def test_requirements_eval_pins():

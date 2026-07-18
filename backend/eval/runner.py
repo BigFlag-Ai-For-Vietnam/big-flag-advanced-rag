@@ -1,8 +1,9 @@
-"""Chạy eval in-process: nạp dataset (silver JSONL hoặc golden MLflow) -> thực thi RAG
-thật qua qa_service, ghi lại thành MLflow trace đúng hình dạng mà tích hợp native
-mlflow.genai.scorers.ragas cần (RETRIEVER span, output [{"page_content": ...}]).
+"""Chạy eval in-process: nạp dataset (silver JSONL hoặc golden MLflow) -> thực thi kỹ thuật
+RAG đã chọn (registry `eval.techniques`, FR-17) -> ghi lại thành MLflow trace đúng hình dạng
+mà tích hợp native mlflow.genai.scorers.ragas cần (RETRIEVER span, output
+[{"page_content": ...}]).
 
-Việc chấm điểm (mlflow.genai.evaluate() + ragas scorer) nằm ở eval/cli.py::cmd_run —
+Việc chấm điểm (mlflow.genai.evaluate() + ragas scorer) nằm ở eval/cli.py::cmd_judge —
 module này chỉ chịu trách nhiệm tạo trace, không tự chấm điểm (NFR-2: không import ragas
 ở đây, chỉ mlflow — lazy trong hàm để suite offline không cần cài mlflow/ragas).
 """
@@ -11,8 +12,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from app.services import qa_service
 
 DEFAULT_TOP_K = 5  # khớp QueryRequest.top_k mặc định của playground
 
@@ -70,25 +69,25 @@ def load_dataset(source: str) -> list[EvalSample]:
     return _load_mlflow_dataset(source)
 
 
-def traced_answer(question: str, top_k: int = DEFAULT_TOP_K) -> str:
-    """Chạy retrieve+answer THẬT qua qa_service, ghi thành 1 MLflow trace: span gốc
-    (CHAIN) bọc span RETRIEVER — output span RETRIEVER phải là list[{"page_content": ...}]
-    để mlflow.genai.scorers.ragas trích được retrieved_contexts (xem
-    extract_retrieval_context_from_trace / _parse_chunk trong mlflow, xác nhận sống).
+def traced_answer(question: str, top_k: int = DEFAULT_TOP_K, *, technique=None) -> str:
+    """Chạy kỹ thuật RAG đã chọn (mặc định 'trivial' qua registry, FR-17), ghi thành 1
+    MLflow trace: span gốc (CHAIN) bọc span RETRIEVER — output span RETRIEVER phải là
+    list[{"page_content": ...}] để mlflow.genai.scorers.ragas trích được retrieved_contexts
+    (xem extract_retrieval_context_from_trace / _parse_chunk trong mlflow, xác nhận sống).
     Trả về trace_id (đã flush) để cli.py gọi mlflow.get_trace()/log_expectation()."""
     import mlflow
     from mlflow.entities import SpanType
 
-    from app.services import llm_client
+    from eval.techniques import resolve
+
+    technique = technique or resolve("trivial")
 
     with mlflow.start_span(name="answer", span_type=SpanType.CHAIN) as root:
         root.set_inputs({"question": question, "top_k": top_k})
+        response, retrieved_contexts = technique(question, top_k)
         with mlflow.start_span(name="retrieve", span_type=SpanType.RETRIEVER) as rspan:
             rspan.set_inputs({"question": question, "top_k": top_k})
-            citations = qa_service.retrieve(question, top_k)
-            rspan.set_outputs([{"page_content": c.final_content} for c in citations])
-        messages = qa_service.build_messages(question, citations)
-        response = llm_client.chat(messages, temperature=0.2, max_tokens=1024, tag="qa")
+            rspan.set_outputs([{"page_content": c} for c in retrieved_contexts])
         root.set_outputs(response)
         trace_id = root.trace_id
 
@@ -96,9 +95,11 @@ def traced_answer(question: str, top_k: int = DEFAULT_TOP_K) -> str:
     return trace_id
 
 
-def run(source: str, *, top_k: int = DEFAULT_TOP_K) -> list:
-    """Nạp dataset -> chạy RAG thật (có trace) từng sample -> log expectation
-    'expected_output' nếu sample có reference -> trả về list[Trace] cho cli.py chấm điểm."""
+def run(source: str, *, top_k: int = DEFAULT_TOP_K, technique=None) -> list:
+    """Nạp dataset -> chạy kỹ thuật RAG đã chọn (có trace) từng sample -> gắn tag
+    synthesizer_name/persona_name lên trace (để cli.py breakdown theo tier/persona sau khi
+    chấm điểm, FR-12) -> log expectation 'expected_output' nếu sample có reference -> trả về
+    list[Trace] cho cli.py chấm điểm."""
     import mlflow
     from mlflow.entities import AssessmentSource
     from mlflow.entities.assessment_source import AssessmentSourceType
@@ -106,7 +107,11 @@ def run(source: str, *, top_k: int = DEFAULT_TOP_K) -> list:
     samples = load_dataset(source)
     traces = []
     for sample in samples:
-        trace_id = traced_answer(sample.user_input, top_k)
+        trace_id = traced_answer(sample.user_input, top_k, technique=technique)
+        if sample.synthesizer_name:
+            mlflow.set_trace_tag(trace_id=trace_id, key="synthesizer_name", value=sample.synthesizer_name)
+        if sample.persona_name:
+            mlflow.set_trace_tag(trace_id=trace_id, key="persona_name", value=sample.persona_name)
         if sample.reference:
             mlflow.log_expectation(
                 trace_id=trace_id,

@@ -51,6 +51,47 @@ class MultiHopAvailability:
     available: bool
 
 
+def apply_backfill(distribution, availability: list[MultiHopAvailability]):
+    """Loại synthesizer 0-cluster khỏi distribution, dồn trọng số về SingleHopSpecific
+    (trivial). Không bao giờ raise vì KG thiếu cluster — chỉ raise nếu bản thân
+    reallocation phá vỡ bất biến tổng trọng số == 1.0 (lỗi lập trình, không phải input xấu).
+
+    Trả về (new_distribution, shortfall_report); report rỗng nếu mọi synthesizer available."""
+    unavailable = {a.synthesizer_name: a for a in availability if not a.available}
+    if not unavailable:
+        return distribution, []
+
+    reallocated = 0.0
+    kept: list[list] = []
+    for synth, weight in distribution:
+        if synth.name in unavailable:
+            reallocated += weight
+        else:
+            kept.append([synth, weight])
+
+    for entry in kept:
+        if isinstance(entry[0], SingleHopSpecificQuerySynthesizer):
+            entry[1] += reallocated
+            break
+
+    new_distribution = [(synth, weight) for synth, weight in kept]
+    total = sum(weight for _, weight in new_distribution)
+    if not math.isclose(total, 1.0, abs_tol=1e-9):
+        raise ValueError(
+            f"apply_backfill: tổng trọng số sau backfill phải = 1.0 (nhận {total})"
+        )
+
+    report = [
+        {
+            "synthesizer_name": a.synthesizer_name,
+            "num_clusters": a.num_clusters,
+            "reallocated_weight": next(w for s, w in distribution if s.name == a.synthesizer_name),
+        }
+        for a in availability if not a.available
+    ]
+    return new_distribution, report
+
+
 def multi_hop_availability(kg, distribution) -> list[MultiHopAvailability]:
     """Báo cáo số cluster mỗi multi-hop synthesizer tìm được trên KG.
 
