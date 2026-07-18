@@ -169,6 +169,7 @@ services:
       --artifacts-destination s3://${MLFLOW_BUCKET:-mlflow}
       --serve-artifacts
       --allowed-hosts "localhost,localhost:*,127.0.0.1,127.0.0.1:*,mlflow,mlflow:*,mlflow.big-rag.dev,mlflow.big-rag.dev:*,host.docker.internal,host.docker.internal:*"
+      --cors-allowed-origins "https://mlflow.big-rag.dev,http://localhost:*,http://127.0.0.1:*"
     depends_on:
       postgres:
         condition: service_healthy
