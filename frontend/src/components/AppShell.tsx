@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
-import { UploadCloud, LayoutGrid, MessagesSquare, Boxes } from "lucide-react";
+import { NavLink, useLocation } from "react-router-dom";
+import { UploadCloud, LayoutGrid, MessagesSquare, Boxes, Columns2 } from "lucide-react";
 import { getHealth } from "../api/client";
 import ThemeToggle from "./ThemeToggle";
 import { cn } from "../lib/cn";
@@ -9,9 +9,11 @@ const NAV = [
   { to: "/documents", label: "Tài liệu", icon: LayoutGrid },
   { to: "/upload", label: "Tải lên", icon: UploadCloud },
   { to: "/playground", label: "Playground", icon: MessagesSquare },
+  { to: "/showcase", label: "Showcase Demo", icon: Columns2 },
 ];
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  const location = useLocation();
   const [online, setOnline] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -109,7 +111,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 lg:py-10">{children}</main>
+        <main
+          className={cn(
+            "mx-auto w-full flex-1 px-4 py-6 sm:px-6 lg:py-10",
+            location.pathname === "/showcase" ? "max-w-7xl" : "max-w-5xl"
+          )}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

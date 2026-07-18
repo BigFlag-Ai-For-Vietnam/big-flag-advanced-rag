@@ -7,12 +7,13 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.catalog_presets import resolve_focus_entities
+from app.config import settings
 from app.db import get_db
-from app.models import Chunk, Document, DocumentStatus
+from app.models import Chunk, Document, DocumentStatus, GraphStatus
 from app.schemas.document import (
     DocumentDetail,
     DocumentListResponse,
@@ -22,7 +23,7 @@ from app.schemas.document import (
     VersionChainItem,
     VersionChainResponse,
 )
-from app.services import pipeline, qdrant_service, storage_service
+from app.services import graph_service, pipeline, qdrant_service, storage_service
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -57,11 +58,46 @@ def _lifecycle(doc: Document) -> str:
     return "expired"
 
 
+def _graph_status(doc: Document) -> GraphStatus:
+    return GraphStatus(doc.graph_status or GraphStatus.not_built)
+
+
+def _graph_eligible(doc: Document) -> bool:
+    return bool(doc.category and doc.category in settings.kg_categories)
+
+
+def _graph_build_enabled() -> bool:
+    return settings.kg_enable_build and graph_service.is_configured()
+
+
+def _apply_graph_state(output, doc: Document):
+    output.graph_status = _graph_status(doc)
+    output.graph_error_message = doc.graph_error_message
+    output.graph_eligible = _graph_eligible(doc)
+    output.graph_build_enabled = _graph_build_enabled()
+    return output
+
+
 def _to_summary(db: Session, doc: Document) -> DocumentSummary:
     summary = DocumentSummary.model_validate(doc)
     summary.chunk_count = _chunk_count(db, doc.id)
     summary.lifecycle = _lifecycle(doc)
-    return summary
+    return _apply_graph_state(summary, doc)
+
+
+def _to_status(db: Session, doc: Document) -> StatusResponse:
+    return _apply_graph_state(
+        StatusResponse(
+            id=doc.id,
+            status=doc.status,
+            page_count=doc.page_count,
+            chunk_count=_chunk_count(db, doc.id),
+            error_message=doc.error_message,
+            graph_status=_graph_status(doc),
+            graph_error_message=doc.graph_error_message,
+        ),
+        doc,
+    )
 
 
 def _version_item(doc: Document) -> VersionChainItem:
@@ -135,7 +171,7 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
     detail = DocumentDetail.model_validate(doc)
     detail.chunk_count = len(doc.chunks)
     detail.lifecycle = _lifecycle(doc)
-    return detail
+    return _apply_graph_state(detail, doc)
 
 
 @router.get("/{document_id}/status", response_model=StatusResponse)
@@ -143,13 +179,7 @@ def get_status(document_id: str, db: Session = Depends(get_db)):
     doc = db.get(Document, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy document.")
-    return StatusResponse(
-        id=doc.id,
-        status=doc.status,
-        page_count=doc.page_count,
-        chunk_count=_chunk_count(db, doc.id),
-        error_message=doc.error_message,
-    )
+    return _to_status(db, doc)
 
 
 @router.post("/{document_id}/reprocess", response_model=DocumentSummary)
@@ -161,6 +191,11 @@ def reprocess_document(
     doc = db.get(Document, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy document.")
+    if _graph_status(doc) == GraphStatus.building:
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge Graph đang build; hãy chờ hoàn tất trước khi chạy lại toàn pipeline.",
+        )
     doc.status = DocumentStatus.uploaded
     doc.error_message = None
     db.commit()
@@ -168,11 +203,78 @@ def reprocess_document(
     return _to_summary(db, doc)
 
 
+@router.post("/{document_id}/graph/rebuild", response_model=StatusResponse, status_code=202)
+def rebuild_document_graph(document_id: str, db: Session = Depends(get_db)):
+    """Build/retry/rebuild KG từ chunks hiện có, không chạy lại vector pipeline."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy document.")
+    if doc.status != DocumentStatus.indexed or _chunk_count(db, doc.id) == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Document phải index xong và có chunks trước khi build Knowledge Graph.",
+        )
+    if not _graph_eligible(doc):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Category '{doc.category or ''}' không thuộc KG_CATEGORIES.",
+        )
+    if not _graph_build_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Knowledge Graph build đang tắt hoặc Neo4j credentials chưa đầy đủ.",
+        )
+
+    previous_status = _graph_status(doc)
+    claimed = db.execute(
+        update(Document)
+        .where(
+            Document.id == document_id,
+            or_(
+                Document.graph_status.is_(None),
+                Document.graph_status != GraphStatus.building.value,
+            ),
+        )
+        .values(graph_status=GraphStatus.building.value, graph_error_message=None)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Knowledge Graph đang được build.")
+    db.commit()
+    db.refresh(doc)
+
+    try:
+        if previous_status in {GraphStatus.ready, GraphStatus.failed}:
+            graph_service.delete_by_document(doc.id, doc.title, raise_on_error=True)
+        from app.services.kg import build_service as kg_build_service  # lazy: import nặng
+
+        kg_build_service.submit_graph_build(
+            doc.id, doc.title, [chunk.final_content for chunk in doc.chunks]
+        )
+    except Exception as exc:  # noqa: BLE001
+        doc.graph_status = GraphStatus.failed
+        doc.graph_error_message = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return _to_status(db, doc)
+
+
 @router.delete("/{document_id}", status_code=204)
 def delete_document(document_id: str, db: Session = Depends(get_db)):
     doc = db.get(Document, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy document.")
+    if _graph_status(doc) == GraphStatus.building:
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge Graph đang build; hãy chờ hoàn tất trước khi xóa document.",
+        )
+    if _graph_status(doc) != GraphStatus.not_built and graph_service.is_configured():
+        try:
+            graph_service.delete_by_document(doc.id, doc.title, raise_on_error=True)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     # Dọn Qdrant points trước, sau đó xoá DB (cascade xoá pages/chunks).
     qdrant_service.delete_by_document(document_id)
     # Xoá blob PDF gốc + ảnh page qua storage_service (best-effort, đã nuốt lỗi bên trong).

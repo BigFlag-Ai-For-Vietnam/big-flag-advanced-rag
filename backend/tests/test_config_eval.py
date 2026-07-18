@@ -25,3 +25,5 @@ def test_eval_settings_env_and_defaults(monkeypatch):
     assert d.mlflow_experiment == "advanced-rag-eval"
     assert d.eval_judge_model == ""
     assert d.eval_max_workers == 4
+    assert d.llm_timeout == 150.0
+    assert d.interactive_llm_max_retries == 1

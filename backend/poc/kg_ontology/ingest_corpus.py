@@ -12,7 +12,9 @@ Dùng collection Qdrant RIÊNG cho corpus này — set qua env var TRƯỚC khi 
 from __future__ import annotations
 
 import os
+import os
 import sys
+import time
 from pathlib import Path
 
 _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -21,15 +23,39 @@ if _BACKEND_DIR not in sys.path:
 
 from app.config import settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
-from app.models import Document, DocumentStatus  # noqa: E402
+from app.models import Document, DocumentStatus, GraphStatus  # noqa: E402
 from app.services import pipeline, storage_service  # noqa: E402
 
 CORPUS_DIR = Path(__file__).resolve().parents[3] / "sample_compliance_corpus"
-CATEGORY = "tuan_thu"
+CATEGORY = "van_ban_tuan_thu"
 
 
 def _iter_pdfs() -> list[Path]:
     return sorted(CORPUS_DIR.glob("*.pdf"))
+
+
+def _wait_for_graphs(db, document_ids: list[str]) -> dict[str, str]:
+    """Giữ process sống tới khi toàn bộ background graph jobs kết thúc."""
+    timeout = int(os.environ.get("KG_WAIT_TIMEOUT_SECONDS", "7200"))
+    deadline = time.monotonic() + timeout
+    last: dict[str, str] = {}
+    terminal = {GraphStatus.ready.value, GraphStatus.failed.value}
+    while True:
+        db.expire_all()
+        rows = db.query(Document).filter(Document.id.in_(document_ids)).all()
+        current = {
+            row.id: (row.graph_status or GraphStatus.not_built.value) for row in rows
+        }
+        for row in rows:
+            if last.get(row.id) != current[row.id]:
+                print(f"    [KG] {row.original_filename}: {current[row.id]}")
+        last = current
+        if len(current) == len(document_ids) and all(v in terminal for v in current.values()):
+            return current
+        if time.monotonic() >= deadline:
+            pending = [doc_id for doc_id, state in current.items() if state not in terminal]
+            raise TimeoutError(f"KG build quá {timeout}s; còn chờ document: {pending}")
+        time.sleep(2)
 
 
 def main() -> None:
@@ -80,11 +106,28 @@ def main() -> None:
                 print(f"    !! KHÔNG indexed: {document_id_row.error_message}")
             results.append((title, document_id_row.id, status.value, chunk_count, catalog_facets))
 
+        graph_results: dict[str, str] = {}
+        if settings.kg_enable_build and CATEGORY in settings.kg_categories:
+            print("\n=== Chờ Knowledge Graph hoàn tất ===")
+            graph_results = _wait_for_graphs(db, [row[1] for row in results])
+
         print("\n=== Tổng kết ===")
         ok = sum(1 for r in results if r[2] == "indexed")
         print(f"{ok}/{len(results)} document indexed thành công.")
         for title, doc_id, status, chunks, facets in results:
-            print(f"  {status:10s} chunks={chunks:2d} facets={facets:2d}  {title}  ({doc_id})")
+            graph_status = graph_results.get(doc_id, GraphStatus.not_built.value)
+            print(
+                f"  vector={status:10s} graph={graph_status:10s} chunks={chunks:2d} "
+                f"facets={facets:2d}  {title}  ({doc_id})"
+            )
+        if graph_results:
+            graph_ok = sum(1 for value in graph_results.values() if value == GraphStatus.ready.value)
+            print(f"{graph_ok}/{len(graph_results)} document build Knowledge Graph thành công.")
+            failed_ids = [doc_id for doc_id, value in graph_results.items() if value == GraphStatus.failed.value]
+            if failed_ids:
+                failed_docs = db.query(Document).filter(Document.id.in_(failed_ids)).all()
+                for document in failed_docs:
+                    print(f"  KG FAILED {document.original_filename}: {document.graph_error_message}")
     finally:
         db.close()
 

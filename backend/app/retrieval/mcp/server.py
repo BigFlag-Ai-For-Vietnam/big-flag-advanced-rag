@@ -7,9 +7,12 @@ gọi qua tool này, không import thẳng app.retrieval.engine.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import threading
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from app.retrieval import engine
 from app.schemas.playground import RetrieveResult
@@ -21,7 +24,7 @@ mcp = FastMCP("retrieval-engine", host="0.0.0.0", port=8100)
 
 
 @mcp.tool()
-def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
+async def retrieve(question: str, ctx: Context, top_k: int = 5) -> RetrieveResult:
     """Tìm các đoạn tài liệu liên quan nhất tới câu hỏi (điều khoản, quyền lợi, phí, sản
     phẩm/dịch vụ ngân hàng đã index). KHÔNG sinh câu trả lời; caller tự dùng citation
     để trả lời câu hỏi.
@@ -39,7 +42,28 @@ def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
     dict trần khiến SDK không tạo structuredContent, chỉ trả text JSON trong content.
     """
     logger.info("[mcp.retrieve] question=%r top_k=%s", question, top_k)
-    result = engine.retrieve(question, top_k)
+    loop = asyncio.get_running_loop()
+    cancelled = threading.Event()
+    sequence = 0
+
+    def report(event: dict) -> None:
+        nonlocal sequence
+        sequence += 1
+        message = json.dumps({**event, "seq": sequence}, ensure_ascii=False)
+        future = asyncio.run_coroutine_threadsafe(
+            ctx.report_progress(float(sequence), message=message), loop
+        )
+        future.result()
+
+    task = asyncio.create_task(
+        asyncio.to_thread(engine.retrieve, question, top_k, progress=report, cancelled=cancelled.is_set)
+    )
+    try:
+        result = await task
+    except asyncio.CancelledError:
+        cancelled.set()
+        task.cancel()
+        raise
     logger.info(
         "[mcp.retrieve] trả về %s citation(s), %s graph fact(s)",
         len(result["citations"]), len(result["graph_facts"]),

@@ -224,22 +224,32 @@ def concept_matches(query_text: str, top_k: int = 5) -> list[dict]:
     return facts
 
 
-def delete_by_document(document_id: str, document_title: str) -> None:
+def delete_by_document(
+    document_id: str, document_title: str, *, raise_on_error: bool = False
+) -> bool:
     """Xoá node graph của 1 document — ưu tiên `document_id` (đã stamp lúc build); fallback
     `file_path == title AND document_id IS NULL` cho data cũ chưa được stamp. Document.title
     KHÔNG unique nên chỉ xoá theo title khi node chưa có document_id (tránh xoá nhầm document
     khác cùng tên đã stamp)."""
     if not is_configured():
-        return
+        if raise_on_error:
+            raise RuntimeError("Neo4j chưa được cấu hình.")
+        return False
     try:
         with _driver().session() as session:
-            session.run("MATCH (n) WHERE n.document_id = $did DETACH DELETE n", did=document_id)
+            session.run(
+                "MATCH (n) WHERE n.document_id = $did DETACH DELETE n", did=document_id
+            )
             session.run(
                 "MATCH (n) WHERE n.file_path = $title AND n.document_id IS NULL DETACH DELETE n",
                 title=document_title,
             )
+        return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("[delete_by_document] lỗi (Neo4j chưa sẵn sàng?): %s", exc)
+        if raise_on_error:
+            raise RuntimeError(f"Không thể dọn graph cũ: {exc}") from exc
+        return False
 
 
 def stats() -> dict:

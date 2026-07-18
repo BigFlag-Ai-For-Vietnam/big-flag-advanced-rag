@@ -104,13 +104,20 @@ def run_pipeline(document_id: str) -> None:
         # Tách trạng thái riêng (graph_status) khỏi DocumentStatus: DocumentStatus.indexed vẫn
         # là tín hiệu DUY NHẤT "chunk-RAG dùng được", không phụ thuộc graph build xong hay chưa.
         if settings.kg_enable_build and document.category in settings.kg_categories:
-            from app.services.kg import build_service as kg_build_service  # lazy: import nặng (lightrag)
-
             document.graph_status = GraphStatus.building
+            document.graph_error_message = None
             db.commit()
-            kg_build_service.submit_graph_build(
-                document.id, document.title, [cd["final_content"] for cd in chunk_dicts]
-            )
+            try:
+                from app.services.kg import build_service as kg_build_service  # lazy: import nặng
+
+                kg_build_service.submit_graph_build(
+                    document.id, document.title, [cd["final_content"] for cd in chunk_dicts]
+                )
+            except Exception as exc:  # KG lỗi không được làm hỏng vector pipeline
+                logger.exception("Không thể submit graph build cho document %s", document.id)
+                document.graph_status = GraphStatus.failed
+                document.graph_error_message = str(exc)[:2000]
+                db.commit()
 
         # Catalog document-level (cây entities — chỉ TÊN mục, không có giá trị).
         # Nguồn: "chunks" (final_content đã contextual — mảnh self-contained nhờ câu định vị,
@@ -191,3 +198,19 @@ def _reset_document(db, document: Document) -> None:
     document.page_count = None
     document.catalog = None
     db.commit()
+
+
+def recover_interrupted_graph_builds() -> int:
+    """Background KG job không bền qua process restart; chuyển job treo thành retryable."""
+    db = SessionLocal()
+    try:
+        rows = db.query(Document).filter(Document.graph_status == GraphStatus.building).all()
+        for document in rows:
+            document.graph_status = GraphStatus.failed
+            document.graph_error_message = (
+                "Knowledge Graph build bị gián đoạn do backend khởi động lại. Hãy Retry."
+            )
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()

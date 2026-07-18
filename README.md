@@ -9,7 +9,7 @@ Mô hình **ba kho lưu trữ**:
 - **Vector DB**: Qdrant — CHỈ giữ vector + payload nhỏ (`document_id, chunk_id, chunk_index, title, final_content`). Raw text nằm ở SQLite.
 - **Blob storage**: PDF gốc + ảnh page (PNG) đi qua `storage_service` — backend `local` (đĩa, mặc định) hoặc `s3` (RustFS / S3-compatible). Xem [Lưu trữ file](#lưu-trữ-file-storage).
 - **LLM/VLM/Embedding**: FPT AI Marketplace (OpenAI-compatible) qua thư viện `openai`.
-- **Frontend**: React + Vite + TypeScript (3 trang: Upload, Documents, Playground).
+- **Frontend**: React + Vite + TypeScript (Upload, Documents, Playground, Showcase Demo).
 
 ```
 backend/app
@@ -157,6 +157,8 @@ cd infra && cp .env.example .env && docker compose up --build
    `uploaded → parsing → parsed → chunking → indexing → indexed`.
 2. **Documents**: xem `parsed_text` từng page + danh sách chunks (`final_content` = title + câu định vị + chunk). Nút Reprocess / Xoá.
 3. **Playground**: nhập câu hỏi → embed → Qdrant search top_k → LLM trả lời (stream) + hiển thị nguồn chunk.
+4. **Showcase Demo**: chạy cùng câu hỏi song song qua Advanced RAG và Raw Vector RAG,
+   stream hai câu trả lời cạnh nhau cùng trace, coverage, nguồn và latency.
 
 ## API chính (prefix `/api`)
 | Method | Path | Mô tả |
@@ -168,6 +170,8 @@ cd infra && cp .env.example .env && docker compose up --build
 | POST | `/api/documents/{id}/reprocess` | Chạy lại pipeline |
 | DELETE | `/api/documents/{id}` | Xoá document + pages + chunks + Qdrant points |
 | POST | `/api/playground/query` | RAG query (`stream: true` → SSE) |
+| POST | `/api/playground/mcp-retrieve/stream` | Debug Retrieval Engine qua MCP với progress SSE theo từng bước |
+| POST | `/api/showcase/compare` | SSE so sánh Advanced RAG và Raw Vector RAG trên cùng input |
 
 ## Test
 ```bash

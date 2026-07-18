@@ -75,7 +75,9 @@ class Document(Base):
     superseded_by_id: Mapped[str | None] = mapped_column(String(36), nullable=True)   # ai thay thế bản này
     supersession_note: Mapped[str | None] = mapped_column(Text, nullable=True)        # vd "giữ hiệu lực Phụ lục 02"
     # --- Knowledge Graph build (Neo4j via LightRAG) — độc lập với `status` ở trên ---
-    graph_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    graph_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default=GraphStatus.not_built
+    )
     graph_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(

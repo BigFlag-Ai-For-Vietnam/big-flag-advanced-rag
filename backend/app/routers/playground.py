@@ -11,20 +11,23 @@ Fallback: nếu MCP không sẵn sàng/lỗi -> retrieve thẳng Qdrant (không 
 rerank) để /query không chết.
 
 - /query        : QA chính (stream SSE + non-stream), kèm catalogs.
-- /mcp-retrieve : debug riêng Retrieval Engine (citations + trace, KHÔNG sinh câu trả lời).
+- /mcp-retrieve : debug Retrieval Engine; bản stream tiếp tục sinh câu trả lời từ evidence.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
+import uuid
+from typing import Awaitable, Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models import Document
 from app.retrieval.mcp import client as retrieval_client
 from app.schemas.playground import (
     CatalogInfo,
@@ -37,28 +40,17 @@ from app.schemas.playground import (
     QueryResponse,
     SubgoalCoverage,
 )
-from app.services import catalog_service, embedding_service, llm_client, qdrant_service, tracing
+from app.services import embedding_service, llm_client, qa_service, qdrant_service, tracing
 
 router = APIRouter(prefix="/api/playground", tags=["playground"])
 logger = logging.getLogger("playground")
-
-SYSTEM_PROMPT = (
-    "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
-    "CATALOG là bản đồ mục lục của tài liệu (chỉ tên mục, không có giá trị) — dùng để trả "
-    "lời ĐẦY ĐỦ, đặc biệt câu hỏi liệt kê (đối chiếu catalog xem đã đủ mục chưa). "
-    "TRI THỨC ĐỒ THỊ (nếu có) là quan hệ giữa văn bản/khái niệm (căn cứ/thay thế/tham chiếu/"
-    "ưu tiên hơn, hoặc nhiều giá trị khác nhau cho cùng 1 khái niệm) — dùng để SUY LUẬN quan "
-    "hệ/xung đột/thay thế xuyên văn bản, KHÔNG phải trích dẫn nguyên văn; trích dẫn [số] vẫn "
-    "chỉ trỏ vào NGỮ CẢNH (đoạn văn bản), không trỏ vào tri thức đồ thị. "
-    "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
-    "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
-)
-
+ProgressCallback = Callable[[dict], Awaitable[None]]
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 # ------------------------- retrieval -------------------------
 
 async def _retrieve(
-    question: str, top_k: int
+    question: str, top_k: int, *, progress: ProgressCallback | None = None
 ) -> tuple[list[Citation], list[GraphFact], list[SubgoalCoverage]]:
     """Gọi Retrieval Engine (agentic planning) qua MCP → citations + graph_facts + coverage
     từng sub-goal. Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning, không graph)."""
@@ -68,12 +60,26 @@ async def _retrieve(
         inputs={"question": question, "top_k": top_k},
     ) as span:
         try:
-            result = await retrieval_client.retrieve(question, top_k)
+            result = await retrieval_client.retrieve(question, top_k, progress=progress)
             citations, graph_facts, subgoals = result.citations, result.graph_facts, result.subgoals
             fallback = False
         except Exception as exc:  # noqa: BLE001 — MCP down/lỗi -> fallback
             logger.warning("Retrieval Engine (MCP) lỗi, fallback Qdrant trực tiếp: %s", exc)
-            citations, graph_facts, subgoals, fallback = _simple_retrieve(question, top_k), [], [], True
+            if progress:
+                await progress({
+                    "stage": "kb_search", "status": "warning",
+                    "label": "MCP không khả dụng, chuyển sang dense retrieval",
+                    "detail": {"reason": type(exc).__name__},
+                })
+                await progress({"stage": "kb_search", "status": "started", "label": "Đang tìm trực tiếp trong Qdrant"})
+            citations = await asyncio.to_thread(_simple_retrieve, question, top_k)
+            graph_facts, subgoals, fallback = [], [], True
+            if progress:
+                await progress({
+                    "stage": "kb_search", "status": "completed",
+                    "label": f"Dense retrieval tìm thấy {len(citations)} đoạn",
+                    "detail": {"hit_count": len(citations)},
+                })
         tracing.set_outputs(
             span,
             {
@@ -103,31 +109,10 @@ def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
 
 
 def _fetch_catalogs(db: Session, citations: list[Citation]) -> list[CatalogInfo]:
-    """Lấy catalog document-level (SQLite) cho các tài liệu xuất hiện trong citations."""
-    doc_ids: list[str] = []
-    for c in citations:
-        if c.document_id and c.document_id not in doc_ids:
-            doc_ids.append(c.document_id)
-    out: list[CatalogInfo] = []
-    for did in doc_ids:
-        doc = db.get(Document, did)
-        if settings.retrieval_exclude_inactive and doc and not doc.is_active:
-            continue
-        if doc and doc.catalog and doc.catalog.get("tree"):
-            out.append(CatalogInfo(document_id=doc.id, title=doc.title, catalog=doc.catalog))
-    return out
+    return qa_service.fetch_catalogs(db, citations)
 
 
 # ------------------------- answer -------------------------
-
-def _format_graph_facts(graph_facts: list[GraphFact]) -> str:
-    lines = []
-    for f in graph_facts:
-        prop_txt = f" ({f.properties})" if f.properties else ""
-        source_txt = f" [nguồn: {f.source_document_title}]" if f.source_document_title else ""
-        lines.append(f"- {f.source_entity} --{f.relation}--> {f.target_entity}{prop_txt}{source_txt}")
-    return "\n".join(lines)
-
 
 def _build_messages(
     question: str,
@@ -136,48 +121,49 @@ def _build_messages(
     subgoals: list[SubgoalCoverage],
     graph_facts: list[GraphFact],
 ) -> list[dict]:
-    blocks = [
-        f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
-        for i, c in enumerate(citations)
-    ]
-    context = "\n\n".join(blocks) if blocks else "(không có ngữ cảnh)"
-    catalog_text = "\n\n".join(
-        catalog_service.format_catalog_text(c.title, c.catalog) for c in catalogs
-    ).strip()
-    graph_text = _format_graph_facts(graph_facts)
-    # Các sub-goal chưa đủ bằng chứng -> yêu cầu LLM nêu rõ phần còn thiếu thay vì bịa.
-    missing = [f"- {s.description}: {s.note or 'chưa đủ bằng chứng'}" for s in subgoals if not s.satisfied]
-
-    parts = [f"NGỮ CẢNH:\n{context}"]
-    if catalog_text:
-        parts.append(f"CATALOG:\n{catalog_text}")
-    if graph_text:
-        parts.append(
-            "TRI THỨC ĐỒ THỊ (quan hệ giữa văn bản/khái niệm — KHÔNG phải trích dẫn nguyên văn):\n"
-            + graph_text
-        )
-    if missing:
-        parts.append("PHẦN CÒN THIẾU BẰNG CHỨNG (nêu rõ trong câu trả lời, KHÔNG bịa):\n" + "\n".join(missing))
-    parts.append(f"CÂU HỎI: {question}")
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": "\n\n".join(parts)},
-    ]
+    return qa_service.build_advanced_messages(
+        question, citations, catalogs, subgoals, graph_facts
+    )
 
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _progress_event(
+    event: dict, *, run_id: str, pipeline: str, seq: int, started: float
+) -> dict:
+    return {
+        "type": "progress",
+        "run_id": run_id,
+        "pipeline": pipeline,
+        "seq": seq,
+        "stage": event.get("stage", "finalize"),
+        "status": event.get("status", "completed"),
+        "label": event.get("label", "Đang xử lý"),
+        "elapsed_ms": max(0, round((time.perf_counter() - started) * 1000)),
+        **({"duration_ms": event["duration_ms"]} if event.get("duration_ms") is not None else {}),
+        **({"detail": event["detail"]} if event.get("detail") else {}),
+    }
+
+
+def _safe_error_message(stage: str) -> str:
+    if stage == "generate":
+        return "Dịch vụ AI tạm thời gián đoạn khi soạn câu trả lời. Vui lòng thử lại."
+    return "Retrieval Engine tạm thời không khả dụng. Vui lòng thử lại."
+
+
 # ------------------------- endpoints -------------------------
 
 @router.post("/query", response_model=QueryResponse)
-async def query(req: QueryRequest, db: Session = Depends(get_db)):
+async def query(req: QueryRequest, request: Request, db: Session = Depends(get_db)):
     if not settings.fpt_chat_model or not settings.fpt_embed_model:
         raise HTTPException(status_code=503, detail="Chưa cấu hình FPT_CHAT_MODEL / FPT_EMBED_MODEL.")
 
     if req.stream:
-        return StreamingResponse(_stream_query(db, req), media_type="text/event-stream")
+        return StreamingResponse(
+            _stream_query(db, req, request), media_type="text/event-stream", headers=SSE_HEADERS
+        )
 
     with tracing.span(
         "playground_query",
@@ -190,7 +176,7 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
         with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
             answer = llm_client.chat(
                 _build_messages(req.question, citations, catalogs, coverage, graph_facts),
-                temperature=0.2, max_tokens=1024, tag="qa",
+                temperature=0.2, max_tokens=4096, tag="qa",
             )
             tracing.set_outputs(gen, {"answer_chars": len(answer)})
         tracing.set_outputs(
@@ -200,34 +186,104 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
         return QueryResponse(answer=answer, citations=citations, catalogs=catalogs, graph_facts=graph_facts)
 
 
-async def _stream_query(db: Session, req: QueryRequest):
-    """SSE: gửi catalogs + citations + graph_facts trước, rồi stream token, kết thúc [DONE]."""
+async def _stream_query(db: Session, req: QueryRequest, request: Request):
+    """SSE live progress retrieval, context, rồi answer delta."""
+    run_id = str(uuid.uuid4())
+    started = time.perf_counter()
+    queue: asyncio.Queue[dict] = asyncio.Queue()
+    sequence = 0
+    current_stage = "normalize"
+    current_detail: dict = {}
+
+    async def on_progress(event: dict) -> None:
+        nonlocal current_stage, current_detail
+        next_stage = event.get("stage", current_stage)
+        if next_stage != current_stage:
+            current_detail = {}
+        current_stage = next_stage
+        current_detail = event.get("detail") or current_detail
+        await queue.put(event)
+
     with tracing.span(
         "playground_query",
         span_type=tracing.CHAIN,
         inputs={"question": req.question},
         attributes={"top_k": req.top_k, "stream": True},
     ) as root:
+        retrieval_task = asyncio.create_task(
+            _retrieve(req.question, req.top_k, progress=on_progress)
+        )
         try:
-            citations, graph_facts, coverage = await _retrieve(req.question, req.top_k)
+            yield _sse({"type": "run_started", "run_id": run_id, "question": req.question})
+            last_emit = time.perf_counter()
+            while not retrieval_task.done() or not queue.empty():
+                if await request.is_disconnected():
+                    retrieval_task.cancel()
+                    return
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except TimeoutError:
+                    if time.perf_counter() - last_emit >= 15:
+                        yield ": ping\n\n"
+                        last_emit = time.perf_counter()
+                    continue
+                sequence += 1
+                yield _sse(_progress_event(
+                    event, run_id=run_id, pipeline="playground", seq=sequence, started=started
+                ))
+                last_emit = time.perf_counter()
+
+            citations, graph_facts, coverage = await retrieval_task
             catalogs = _fetch_catalogs(db, citations)
             yield _sse({"type": "catalogs", "catalogs": [c.model_dump() for c in catalogs]})
             yield _sse({"type": "citations", "citations": [c.model_dump() for c in citations]})
             yield _sse({"type": "graph_facts", "graph_facts": [f.model_dump() for f in graph_facts]})
             yield _sse({"type": "coverage", "subgoals": [s.model_dump() for s in coverage]})
+            sequence += 1
+            generation_started = time.perf_counter()
+            current_stage = "generate"
+            yield _sse(_progress_event(
+                {"stage": "generate", "status": "started", "label": "Đang soạn câu trả lời"},
+                run_id=run_id, pipeline="playground", seq=sequence, started=started,
+            ))
             with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
                 token_count = 0
-                for delta in llm_client.chat_stream(
+                async for delta in llm_client.chat_stream_async(
                     _build_messages(req.question, citations, catalogs, coverage, graph_facts),
                     temperature=0.2, max_tokens=1024, tag="qa_stream",
                 ):
+                    if await request.is_disconnected():
+                        return
                     token_count += 1
                     yield _sse({"type": "token", "content": delta})
                 tracing.set_outputs(gen, {"token_deltas": token_count})
+            sequence += 1
+            yield _sse(_progress_event(
+                {
+                    "stage": "generate", "status": "completed", "label": "Đã soạn xong câu trả lời",
+                    "duration_ms": max(0, round((time.perf_counter() - generation_started) * 1000)),
+                },
+                run_id=run_id, pipeline="playground", seq=sequence, started=started,
+            ))
             tracing.set_outputs(root, {"num_citations": len(citations), "num_graph_facts": len(graph_facts)})
+        except asyncio.CancelledError:
+            retrieval_task.cancel()
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.exception("Stream lỗi")
-            yield _sse({"type": "error", "message": str(exc)})
+            sequence += 1
+            yield _sse(_progress_event(
+                {
+                    "stage": current_stage, "status": "failed",
+                    "label": f"Lỗi tại bước {current_stage}",
+                    "detail": {**current_detail, "reason": type(exc).__name__},
+                },
+                run_id=run_id, pipeline="playground", seq=sequence, started=started,
+            ))
+            yield _sse({"type": "error", "message": _safe_error_message(current_stage)})
+        finally:
+            if not retrieval_task.done():
+                retrieval_task.cancel()
     yield "data: [DONE]\n\n"
 
 
@@ -252,3 +308,107 @@ async def mcp_retrieve(req: McpRetrieveRequest):
         subgoals=result.subgoals,
         config=config,
     )
+
+
+@router.post("/mcp-retrieve/stream")
+async def mcp_retrieve_stream(
+    req: McpRetrieveRequest, request: Request, db: Session = Depends(get_db)
+):
+    return StreamingResponse(
+        _stream_mcp_retrieve(db, req, request), media_type="text/event-stream", headers=SSE_HEADERS
+    )
+
+
+async def _stream_mcp_retrieve(db: Session, req: McpRetrieveRequest, request: Request):
+    run_id = str(uuid.uuid4())
+    started = time.perf_counter()
+    queue: asyncio.Queue[dict] = asyncio.Queue()
+    sequence = 0
+    current_stage = "normalize"
+    current_detail: dict = {}
+
+    async def on_progress(event: dict) -> None:
+        nonlocal current_stage, current_detail
+        next_stage = event.get("stage", current_stage)
+        if next_stage != current_stage:
+            current_detail = {}
+        current_stage = next_stage
+        current_detail = event.get("detail") or current_detail
+        await queue.put(event)
+
+    task = asyncio.create_task(retrieval_client.retrieve(req.question, req.top_k, progress=on_progress))
+    try:
+        yield _sse({"type": "run_started", "run_id": run_id, "question": req.question})
+        last_emit = time.perf_counter()
+        while not task.done() or not queue.empty():
+            if await request.is_disconnected():
+                task.cancel()
+                return
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=1.0)
+            except TimeoutError:
+                if time.perf_counter() - last_emit >= 15:
+                    yield ": ping\n\n"
+                    last_emit = time.perf_counter()
+                continue
+            sequence += 1
+            yield _sse(_progress_event(
+                event, run_id=run_id, pipeline="mcp", seq=sequence, started=started
+            ))
+            last_emit = time.perf_counter()
+        result = await task
+        config = McpRetrieveConfig(
+            normalize=settings.retrieval_enable_normalize,
+            rewrite=settings.retrieval_enable_rewrite,
+            rerank=settings.retrieval_enable_rerank,
+            agent_max_steps=settings.retrieval_agent_max_steps,
+        )
+        yield _sse({
+            "type": "retrieve_result",
+            **result.model_dump(),
+            "config": config.model_dump(),
+        })
+        catalogs = _fetch_catalogs(db, result.citations)
+        current_stage = "generate"
+        generation_started = time.perf_counter()
+        sequence += 1
+        yield _sse(_progress_event(
+            {"stage": "generate", "status": "started", "label": "Đang soạn câu trả lời"},
+            run_id=run_id, pipeline="mcp", seq=sequence, started=started,
+        ))
+        async for delta in llm_client.chat_stream_async(
+            _build_messages(
+                req.question, result.citations, catalogs, result.subgoals, result.graph_facts
+            ),
+            temperature=0.2, max_tokens=1024, tag="mcp_playground_stream",
+        ):
+            if await request.is_disconnected():
+                return
+            yield _sse({"type": "token", "content": delta})
+        sequence += 1
+        yield _sse(_progress_event(
+            {
+                "stage": "generate", "status": "completed", "label": "Đã soạn xong câu trả lời",
+                "duration_ms": max(0, round((time.perf_counter() - generation_started) * 1000)),
+            },
+            run_id=run_id, pipeline="mcp", seq=sequence, started=started,
+        ))
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("MCP retrieve stream lỗi")
+        sequence += 1
+        yield _sse(_progress_event(
+            {
+                "stage": current_stage, "status": "failed",
+                "label": f"Lỗi tại bước {current_stage}",
+                "detail": {**current_detail, "reason": type(exc).__name__},
+            },
+            run_id=run_id, pipeline="mcp", seq=sequence, started=started,
+        ))
+        yield _sse({"type": "error", "message": _safe_error_message(current_stage)})
+    finally:
+        if not task.done():
+            task.cancel()
+    yield "data: [DONE]\n\n"

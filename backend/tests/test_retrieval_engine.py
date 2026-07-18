@@ -116,6 +116,58 @@ def test_planning_disabled_single_subgoal(monkeypatch):
     assert len(_cov(out)) == 1                        # planning tắt -> 1 sub-goal = cả câu hỏi
 
 
+def test_retrieve_emits_live_operational_progress(monkeypatch):
+    _mock_common(monkeypatch)
+    monkeypatch.setattr(settings, "retrieval_enable_graph", False)
+
+    def fake_chat(messages, **kw):
+        if kw.get("tag") == "retrieval_plan":
+            return '{"subgoals":[{"description":"phí thẻ","query":"phí thẻ"}]}'
+        if kw.get("tag") == "retrieval_assess":
+            return '{"results":[{"id":"g1","satisfied":true}]}'
+        return ""
+
+    monkeypatch.setattr(nodes.llm_client, "chat", fake_chat)
+    monkeypatch.setattr(engine, "_search", lambda q, k: [_chunk("c1", "d1", 0, 0.9, "phí")])
+    events = []
+
+    result = engine.retrieve("phí thẻ", progress=events.append)
+
+    assert result["citations"]
+    assert events[0]["stage"] == "normalize"
+    assert any(e["stage"] == "plan" and e["status"] == "completed" for e in events)
+    assert any(
+        e["stage"] == "kb_search" and e["status"] == "completed"
+        and e["detail"]["hit_count"] == 1
+        for e in events
+    )
+    assert any(e["stage"] == "graph_search" and e["status"] == "skipped" for e in events)
+    assert events[-1]["stage"] == "finalize"
+
+
+def test_retrieve_honors_cancellation_checkpoint():
+    try:
+        engine.retrieve("q", cancelled=lambda: True)
+        assert False, "cancelled retrieval must stop before doing work"
+    except engine.RetrievalCancelled:
+        pass
+
+
+def test_rewrite_step_falls_back_and_reports_warning(monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_enable_rewrite", True)
+    monkeypatch.setattr(nodes, "rewrite", lambda _question: (_ for _ in ()).throw(RuntimeError("FPT down")))
+    events = []
+    token = engine._progress_reporter.set(events.append)
+    try:
+        result = engine._rewrite_step({"normalized_question": "câu hỏi gốc"})
+    finally:
+        engine._progress_reporter.reset(token)
+
+    assert result == {"rewritten_question": "câu hỏi gốc"}
+    assert events[-1]["stage"] == "rewrite"
+    assert events[-1]["status"] == "warning"
+
+
 def _cov(out):
     """engine.retrieve() bọc coverage; ở đây invoke() trả state thô -> tự build coverage."""
     return engine._subgoal_coverage(out["subgoals"])

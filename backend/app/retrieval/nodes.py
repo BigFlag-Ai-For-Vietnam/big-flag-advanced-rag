@@ -54,6 +54,7 @@ def rewrite(question: str) -> str:
         temperature=0.0,
         max_tokens=200,
         tag="retrieval_rewrite",
+        max_retries=settings.interactive_llm_max_retries,
     ).strip() or question
     logger.info("[rewrite] input=%r output=%r", question, result)
     return result
@@ -141,6 +142,7 @@ def plan(question: str, catalog_outline: str = "") -> list[dict]:
         raw = llm_client.chat(
             [{"role": "system", "content": PLAN_PROMPT}, {"role": "user", "content": user}],
             temperature=0.0, max_tokens=600, tag="retrieval_plan",
+            max_retries=settings.interactive_llm_max_retries,
         )
         items = _parse_json_obj(raw).get("subgoals", [])
     except Exception as exc:  # noqa: BLE001
@@ -209,6 +211,7 @@ def assess(subgoals: list[dict]) -> list[dict]:
         raw = llm_client.chat(
             [{"role": "system", "content": ASSESS_PROMPT}, {"role": "user", "content": user}],
             temperature=0.0, max_tokens=500, tag="retrieval_assess",
+            max_retries=settings.interactive_llm_max_retries,
         )
         results = {str(r.get("id")): r for r in _parse_json_obj(raw).get("results", []) if isinstance(r, dict)}
     except Exception as exc:  # noqa: BLE001
