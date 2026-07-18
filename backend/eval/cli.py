@@ -1,26 +1,25 @@
 """CLI đánh giá RAG: python -m eval <lệnh>.
 
 Rev 2 (spec.md): 2 lệnh cấp cao nhất, mirror đúng 2 process tách biệt —
-  python -m eval dataset {generate,adapt-prompts,review-queue,promote}   # Build/Generate TestDataset
-  python -m eval judge --dataset <name>                                  # Eval/Judge
-Lệnh phẳng cũ (generate/adapt-prompts/review-queue/promote/run ở top-level) KHÔNG còn tồn tại —
+  python -m eval dataset {generate,review-queue,promote}   # Build/Generate TestDataset
+  python -m eval judge --dataset <name>                     # Eval/Judge
+Lệnh phẳng cũ (generate/review-queue/promote/run ở top-level) KHÔNG còn tồn tại —
 argparse tự từ chối là lệnh không hợp lệ (unknown command)."""
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import sys
 from pathlib import Path
 
 TOP_LEVEL_COMMANDS: tuple[str, ...] = ("dataset", "judge")
-DATASET_SUBCOMMANDS: tuple[str, ...] = ("generate", "adapt-prompts", "review-queue", "promote")
+DATASET_SUBCOMMANDS: tuple[str, ...] = ("generate", "review-queue", "promote")
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
     """Sinh testset (silver) từ tài liệu đã index: KG -> query_distribution -> per-persona
-    generate -> language gate -> report + silver JSONL. Yêu cầu: đã chạy `adapt-prompts`
-    trước (FR-5), có personas.json (FR-4), tài liệu ở trạng thái indexed (FR-1)."""
+    generate -> silver JSONL -> upload MLflow dataset. Yêu cầu: có personas.json (FR-4),
+    tài liệu ở trạng thái indexed (FR-1)."""
     from eval.dataset_source import collect_chunks, build_and_log_kg
     from eval.dataset_upload import upload as upload_dataset
     from eval.distribution import (
@@ -30,7 +29,6 @@ def cmd_generate(args: argparse.Namespace) -> int:
         multi_hop_availability,
     )
     from eval.judge import build_judge
-    from eval.language_gate import apply_language_gate, enforce_quality, write_exclusion_report
     from eval.personas import (
         PersonaError,
         load_personas,
@@ -38,14 +36,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
         plan_persona_batches,
         stamp_persona_name,
     )
-    from eval.prompt_adaptation import load_adapted_transforms
 
     import mlflow
     from app.config import settings
     from app.db import SessionLocal
     from ragas.testset import TestsetGenerator
 
-    prompts_dir = Path(args.prompts_dir)
     try:
         personas = load_personas(args.personas)
     except PersonaError as exc:
@@ -85,10 +81,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
             kg.save(str(kg_path))
             mlflow.log_artifact(str(kg_path))
         else:
-            transforms = load_adapted_transforms(bundle.llm, bundle.embeddings, prompts_dir)
-            kg = build_and_log_kg(chunks, kg_path, transforms=transforms)
-            if prompts_dir.exists():  # NFR-4: log đúng version prompt đã dùng để sinh dataset này
-                mlflow.log_artifacts(str(prompts_dir), artifact_path="prompts")
+            kg = build_and_log_kg(chunks, kg_path, llm=bundle.llm, embedding_model=bundle.embeddings)
 
         weights = DistributionWeights(
             single_hop_specific=args.w_single,
@@ -138,21 +131,16 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 d["synthesizer_name"] = s.synthesizer_name
                 all_samples.append(d)
 
-        gate_result = apply_language_gate(all_samples, threshold=args.max_exclusion_rate)
-        report_path = Path(args.out_dir) / "language_gate_report.json"
-        write_exclusion_report(gate_result, report_path)
-        mlflow.log_artifact(str(report_path))
-
         silver_path = Path(args.out_dir) / "silver.jsonl"
         silver_path.parent.mkdir(parents=True, exist_ok=True)
         with silver_path.open("w", encoding="utf-8") as f:
-            for sample in gate_result.retained:
+            for sample in all_samples:
                 f.write(json.dumps(sample, ensure_ascii=False) + "\n")
         mlflow.log_artifact(str(silver_path))
 
-        # FR-16 (r3): đường chính — upload thẳng mẫu retained lên MLflow Evaluation Dataset
+        # FR-16 (r3): đường chính — upload thẳng mẫu sinh ra lên MLflow Evaluation Dataset
         # đặt tên; merge_records upsert (T06) nên chạy lại `generate` không nhân đôi record.
-        upload_result = upload_dataset(args.dataset, gate_result.retained)
+        upload_result = upload_dataset(args.dataset, all_samples)
         dataset_upload_path = Path(args.out_dir) / "dataset_upload.jsonl"
         dataset_upload_path.write_text(upload_result.jsonl, encoding="utf-8")
         mlflow.log_artifact(str(dataset_upload_path))
@@ -161,30 +149,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
             f"'{upload_result.dataset_name}'."
         )
 
-        if gate_result.failed_quality:
-            mlflow.set_tag("quality_gate", "failed")
-            print(
-                f"Cổng chất lượng ngôn ngữ THẤT BẠI: tỉ lệ loại {gate_result.exclusion_rate:.1%} "
-                f"vượt ngưỡng {gate_result.threshold:.1%}.",
-                file=sys.stderr,
-            )
-            return enforce_quality(gate_result)
-
-        mlflow.set_tag("quality_gate", "passed")
-        print(f"Sinh {len(gate_result.retained)} mẫu silver tại {silver_path}")
+        print(f"Sinh {len(all_samples)} mẫu silver tại {silver_path}")
         return 0
-
-
-def cmd_adapt_prompts(args: argparse.Namespace) -> int:
-    """Adapt prompt synthesizer + extractor sang tiếng Việt (chạy 1 lần, cần FPT_API_KEY)."""
-    from eval.judge import build_judge
-    from eval.prompt_adaptation import adapt_and_save_all
-
-    bundle = build_judge()
-    prompts_dir = Path(args.prompts_dir)
-    asyncio.run(adapt_and_save_all(bundle.llm, prompts_dir))
-    print(f"Đã adapt + lưu prompt tiếng Việt vào {prompts_dir}")
-    return 0
 
 
 def cmd_review_queue(args: argparse.Namespace) -> int:
@@ -316,8 +282,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m eval", description="RAG evaluation CLI (RAGAS + MLflow)")
     top = parser.add_subparsers(dest="command", required=True)
 
-    # --- python -m eval dataset {generate,adapt-prompts,review-queue,promote} ---
-    p_dataset = top.add_parser("dataset", help="Build/Generate TestDataset: sinh + adapt prompt + SME review + promote")
+    # --- python -m eval dataset {generate,review-queue,promote} ---
+    p_dataset = top.add_parser("dataset", help="Build/Generate TestDataset: sinh + SME review + promote")
     dataset_sub = p_dataset.add_subparsers(dest="dataset_command", required=True)
 
     p_generate = dataset_sub.add_parser("generate", help="Sinh testset silver từ tài liệu đã index")
@@ -325,22 +291,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_generate.add_argument("--all", action="store_true", help="Dùng mọi tài liệu đã indexed")
     p_generate.add_argument(
         "--dataset", required=True,
-        help="Tên MLflow Evaluation Dataset để upload mẫu retained (FR-16, bắt buộc)",
+        help="Tên MLflow Evaluation Dataset để upload mẫu sinh ra (FR-16, bắt buộc)",
     )
     p_generate.add_argument("--size", type=int, default=10, help="Tổng số câu hỏi sinh ra")
     p_generate.add_argument("--personas", default="personas.json", help="Đường dẫn personas.json (bắt buộc)")
-    p_generate.add_argument("--prompts-dir", default=None, help="Thư mục prompt đã adapt (mặc định: eval/prompts/vi)")
-    p_generate.add_argument("--max-exclusion-rate", type=float, default=0.2, help="Ngưỡng loại tối đa (NFR-5)")
     p_generate.add_argument("--out-dir", default="eval_runs/generate", help="Thư mục ghi artifact")
     p_generate.add_argument("--kg-file", default=None, help="KG ngoài theo contract v1 (FR-2), thay cho KG tự dựng")
     p_generate.add_argument("--w-single", type=float, default=0.5, help="Trọng số single-hop specific (mặc định 0.5)")
     p_generate.add_argument("--w-multi-abstract", type=float, default=0.25, help="Trọng số multi-hop abstract (mặc định 0.25)")
     p_generate.add_argument("--w-multi-specific", type=float, default=0.25, help="Trọng số multi-hop specific (mặc định 0.25)")
     p_generate.set_defaults(func=cmd_generate)
-
-    p_adapt = dataset_sub.add_parser("adapt-prompts", help="Adapt prompt synthesizer/extractor sang tiếng Việt")
-    p_adapt.add_argument("--prompts-dir", default=None, help="Thư mục lưu prompt đã adapt (mặc định: eval/prompts/vi)")
-    p_adapt.set_defaults(func=cmd_adapt_prompts)
 
     p_review_queue = dataset_sub.add_parser("review-queue", help="Tạo MLflow Review Queue cho SME duyệt silver")
     p_review_queue.add_argument("--dataset", required=True, help="Tên dataset (tag dataset_name của trace silver)")
@@ -366,15 +326,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_prompts_dir(args: argparse.Namespace) -> None:
-    """--prompts-dir mặc định None -> dùng DEFAULT_PROMPTS_DIR của prompt_adaptation (lazy import)."""
-    if getattr(args, "prompts_dir", None) is None:
-        from eval.prompt_adaptation import DEFAULT_PROMPTS_DIR
-        args.prompts_dir = str(DEFAULT_PROMPTS_DIR)
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "dataset" and args.dataset_command in ("generate", "adapt-prompts"):
-        _resolve_prompts_dir(args)
     return args.func(args)

@@ -23,7 +23,7 @@ def test_cli_registers_all_subcommands():
     from eval.cli import DATASET_SUBCOMMANDS, TOP_LEVEL_COMMANDS, build_parser
 
     assert TOP_LEVEL_COMMANDS == ("dataset", "judge")
-    assert DATASET_SUBCOMMANDS == ("generate", "adapt-prompts", "review-queue", "promote")
+    assert DATASET_SUBCOMMANDS == ("generate", "review-queue", "promote")
     build_parser()  # constructs without error, no heavy imports triggered
     # Behavior of the two-command split (dispatch + legacy-name rejection) is covered by
     # test_eval_cli.py::test_two_command_split (rev 2, FR-9).

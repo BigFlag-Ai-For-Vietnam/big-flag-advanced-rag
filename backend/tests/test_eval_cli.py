@@ -1,7 +1,7 @@
 """Test CLI 2 lệnh cấp cao (rev 2, FR-9) — offline, chỉ parse, không thực thi handler."""
 import pytest
 
-from eval.cli import build_parser, cmd_adapt_prompts, cmd_generate, cmd_judge
+from eval.cli import build_parser, cmd_generate, cmd_judge
 
 
 def test_two_command_split():
@@ -11,10 +11,6 @@ def test_two_command_split():
     assert args.command == "dataset"
     assert args.dataset_command == "generate"
     assert args.func is cmd_generate
-
-    args2 = parser.parse_args(["dataset", "adapt-prompts"])
-    assert args2.dataset_command == "adapt-prompts"
-    assert args2.func is cmd_adapt_prompts
 
     args3 = parser.parse_args(["judge", "--dataset", "d1"])
     assert args3.command == "judge"
