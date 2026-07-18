@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("eval.cli")
 
 TOP_LEVEL_COMMANDS: tuple[str, ...] = ("dataset", "judge")
 DATASET_SUBCOMMANDS: tuple[str, ...] = ("generate", "review-queue", "promote")
@@ -21,14 +24,14 @@ def cmd_generate(args: argparse.Namespace) -> int:
     generate -> silver JSONL -> upload MLflow dataset. Yêu cầu: có personas.json (FR-4),
     tài liệu ở trạng thái indexed (FR-1)."""
     from eval.dataset_source import collect_chunks, build_and_log_kg
-    from eval.dataset_upload import upload as upload_dataset
+    from eval.dataset_upload import sample_id as dataset_sample_id, upload as upload_dataset
     from eval.distribution import (
         DistributionWeights,
         apply_backfill,
         build_query_distribution,
         multi_hop_availability,
     )
-    from eval.judge import build_judge
+    from eval.judge import build_judge, judge_model_id
     from eval.personas import (
         PersonaError,
         load_personas,
@@ -129,6 +132,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
             for s, sample in zip(testset.samples, eval_samples):
                 d = sample.model_dump(exclude_none=True)
                 d["synthesizer_name"] = s.synthesizer_name
+                d["sample_id"] = dataset_sample_id(d.get("user_input"), d.get("persona_name"))
                 all_samples.append(d)
 
         silver_path = Path(args.out_dir) / "silver.jsonl"
@@ -140,7 +144,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
         # FR-16 (r3): đường chính — upload thẳng mẫu sinh ra lên MLflow Evaluation Dataset
         # đặt tên; merge_records upsert (T06) nên chạy lại `generate` không nhân đôi record.
-        upload_result = upload_dataset(args.dataset, all_samples)
+        upload_result = upload_dataset(args.dataset, all_samples, model=judge_model_id())
         dataset_upload_path = Path(args.out_dir) / "dataset_upload.jsonl"
         dataset_upload_path.write_text(upload_result.jsonl, encoding="utf-8")
         mlflow.log_artifact(str(dataset_upload_path))
@@ -226,15 +230,29 @@ def cmd_judge(args: argparse.Namespace) -> int:
     os.environ["OPENAI_API_KEY"] = settings.fpt_api_key
     os.environ["OPENAI_API_BASE"] = settings.fpt_base_url
     os.environ["OPENAI_BASE_URL"] = settings.fpt_base_url
+    # Judge qua URI "openai:/<model>" đi đường native của mlflow -> requests.post với
+    # MLFLOW_GENAI_EVAL_LLM_TIMEOUT (mặc định 60s — quá ngắn cho GLM reasoning, thinking
+    # bật nên mỗi call judge có thể chạy vài phút). Mặc định 300s; setdefault để user vẫn
+    # override được qua env.
+    os.environ.setdefault("MLFLOW_GENAI_EVAL_LLM_TIMEOUT", "300")
 
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow.set_experiment(settings.mlflow_experiment)
     mlflow.openai.autolog()
 
+    logger.info(
+        "Bắt đầu judge: dataset='%s', technique='%s', top_k=%d, judge='%s', experiment='%s', judge_timeout=%ss",
+        args.dataset, args.technique, args.top_k,
+        settings.eval_judge_model or settings.fpt_chat_model, settings.mlflow_experiment,
+        os.environ["MLFLOW_GENAI_EVAL_LLM_TIMEOUT"],
+    )
+
+    logger.info("Giai đoạn 1/3: chạy RAG thật cho từng mẫu (tạo trace)...")
     traces = run_eval(args.dataset, top_k=args.top_k, technique=technique)
     if not traces:
         print("Dataset rỗng, không có gì để eval.", file=sys.stderr)
         return 1
+    logger.info("Đã tạo %d trace RAG.", len(traces))
 
     from ragas.embeddings import OpenAIEmbeddings
     from mlflow.genai.scorers.ragas import (
@@ -255,13 +273,30 @@ def cmd_judge(args: argparse.Namespace) -> int:
         FactualCorrectness(model=judge_uri),
     ]
 
+    # Tắt thinking cho judge (spike A2): GLM reasoning trả content rỗng/verdict trôi kiểu
+    # ("No"/"Không"/"False") khi thinking bật -> lỗi parse lác đác + timeout. Đường URI của
+    # mlflow không có hook extra_body, nên tiêm thẳng judge llm_factory (đã tắt thinking,
+    # cùng loại LLM mà `dataset generate` truyền cho chính các metric ragas này) vào metric
+    # bên trong scorer — private attr, điểm tiêm duy nhất mà mlflow 3.14 cho phép.
+    from eval.judge import build_judge_llm
+
+    judge_llm = build_judge_llm(async_client=True)
+    for scorer in scorers:
+        if getattr(scorer._metric, "llm", None) is not None:
+            scorer._metric.llm = judge_llm
+        if scorer._llm is not None:
+            scorer._llm = judge_llm
+
+    logger.info("Giai đoạn 2/3: chấm điểm %d trace bằng mlflow.genai.evaluate() (5 scorer ragas, judge %s)...", len(traces), judge_uri)
     result = mlflow.genai.evaluate(data=traces, scorers=scorers)
+    logger.info("Chấm điểm xong — run_id=%s", result.run_id)
 
     # FR-12 (r3): tag technique + breakdown theo tier/persona — mlflow.genai.evaluate() tự
     # log điểm tổng hợp + assessment lên trace, nhưng không tự tag technique hay slice theo
     # synthesizer_name/persona_name (T26).
     from eval.judge_logging import breakdowns, log_run_metadata, rows_from_traces
 
+    logger.info("Giai đoạn 3/3: log metadata + breakdown theo tier/persona...")
     scored_traces = mlflow.search_traces(run_id=result.run_id, return_type="list")
     rows = rows_from_traces(scored_traces)
 
@@ -327,5 +362,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Log tiến trình ra stderr (stdout giữ cho kết quả print) — bật cả logger app.services.*
+    # (llm_client, ...) để thấy retry/fallback trong lúc chạy dài.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
     args = build_parser().parse_args(argv)
     return args.func(args)
