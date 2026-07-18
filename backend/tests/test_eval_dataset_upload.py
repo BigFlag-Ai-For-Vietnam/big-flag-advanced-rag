@@ -2,7 +2,7 @@
 import sys
 import types
 
-from eval.dataset_upload import UploadResult, build_records, upload
+from eval.dataset_upload import UploadResult, build_records, sample_id, upload
 
 
 class _FakeMlflowException(Exception):
@@ -76,6 +76,11 @@ def test_build_records_shape():
                 "expected_response": "Phí thường niên là 500.000đ",
                 "reference_contexts": ["Điều 3: phí thường niên 500.000đ"],
             },
+            "source": {"source_type": "CODE", "source_data": {"generator": "llm"}},
+            "tags": {
+                "source": "llm",
+                "sample_id": sample_id("Phí thường niên bao nhiêu?", "Khách hàng cá nhân"),
+            },
         },
         {
             "inputs": {"question": "Lãi suất trả chậm là bao nhiêu?", "persona_name": "Khách hàng doanh nghiệp"},
@@ -83,8 +88,27 @@ def test_build_records_shape():
                 "expected_response": "Lãi suất trả chậm là 20%/năm",
                 "reference_contexts": ["Điều 5: lãi suất trả chậm 20%/năm"],
             },
+            "source": {"source_type": "CODE", "source_data": {"generator": "llm"}},
+            "tags": {
+                "source": "llm",
+                "sample_id": sample_id("Lãi suất trả chậm là bao nhiêu?", "Khách hàng doanh nghiệp"),
+            },
         },
     ]
+
+
+def test_build_records_stamps_generation_model():
+    records = build_records(SAMPLES, model="GLM-5.2")
+    for record in records:
+        assert record["source"] == {
+            "source_type": "CODE",
+            "source_data": {"generator": "llm", "model": "GLM-5.2"},
+        }
+        assert record["tags"] == {
+            "source": "llm",
+            "sample_id": sample_id(record["inputs"]["question"], record["inputs"]["persona_name"]),
+            "generation_model": "GLM-5.2",
+        }
 
 
 def test_generate_uploads_dataset_and_jsonl(monkeypatch):
@@ -114,3 +138,14 @@ def test_rerun_merges_identical_records(monkeypatch):
     merge_calls = store.datasets["d1"].merge_calls
     assert len(merge_calls) == 2
     assert merge_calls[0] == merge_calls[1]
+
+
+def test_sample_id_deterministic_and_identity_scoped():
+    # Cùng (question, persona) -> cùng id qua mọi lần gọi (re-run generate không đổi id).
+    a = sample_id("Phí thường niên bao nhiêu?", "Khách hàng cá nhân")
+    assert a == sample_id("Phí thường niên bao nhiêu?", "Khách hàng cá nhân")
+    # Khác persona hoặc khác câu hỏi -> id khác (đúng scope record-identity của merge_records).
+    assert a != sample_id("Phí thường niên bao nhiêu?", "Khách hàng doanh nghiệp")
+    assert a != sample_id("Lãi suất trả chậm là bao nhiêu?", "Khách hàng cá nhân")
+    # persona None (silver thiếu persona) vẫn cho id hợp lệ, ổn định.
+    assert sample_id("Q", None) == sample_id("Q")
