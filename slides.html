@@ -1298,35 +1298,101 @@
        như kết quả đo thật. -->
         </section>
 
-        <!-- ============ Slide 10 — Demo 1 ============ -->
+        <!-- ============ Slide 10 — Demo 1 (Time-aware) ============ -->
         <section class="slide">
-          <div class="kicker">Demo 1 / 2</div>
-          <h1>Xung đột theo phạm vi áp dụng</h1>
+          <div class="kicker">Demo 1 / 3</div>
+          <h1>Time-aware — phân định hiệu lực theo thời gian</h1>
           <div class="content" style="flex-direction: row; gap: 18px">
             <div
               style="
                 flex: 0 0 30%;
                 display: flex;
                 flex-direction: column;
-                gap: 12px;
+                gap: 10px;
               "
             >
-              <div class="qcard">
-                “Phiên làm việc tự động khóa sau bao nhiêu phút?”
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px">
-                <div class="node small" style="white-space: normal; flex: 1">
-                  QĐ 342/2024<br /><span style="color: var(--raw)"
-                    ><b>15 phút</b> · Nội bộ</span
+              <div class="qcard">“Thời gian khóa phiên làm việc?”</div>
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 5px;
+                  font-size: 12.5px;
+                "
+              >
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    background: #fff;
+                    border: 1px solid var(--line);
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                  "
+                >
+                  <span>Dự thảo ATTT v3.0 · <b>10 phút</b></span>
+                  <span style="color: #94a3b8; font-weight: 700"
+                    >DỰ THẢO ✗</span
                   >
                 </div>
-                <span
-                  style="color: var(--warn); font-weight: 800; font-size: 18px"
-                  >↔</span
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    background: #fff;
+                    border: 1px solid var(--line);
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                  "
                 >
-                <div class="node small" style="white-space: normal; flex: 1">
-                  QĐ 401/2024<br /><span style="color: var(--graph)"
-                    ><b>30 phút</b> · Từ xa</span
+                  <span>BB họp UB ATTT Q2/2025 · đề xuất <b>20 phút</b></span>
+                  <span style="color: var(--warn); font-weight: 700"
+                    >CHƯA DUYỆT ✗</span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    background: #fff;
+                    border: 1px solid var(--line);
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                  "
+                >
+                  <span>QĐ 215/2022 · <b>15 phút</b></span>
+                  <span style="color: #94a3b8; font-weight: 700"
+                    >BỊ THAY THẾ ✗</span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    background: #f0fdf4;
+                    border: 1px solid var(--ok);
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                  "
+                >
+                  <span>QĐ 342/2024 · <b>15 phút</b> — nội bộ</span>
+                  <span style="color: var(--ok); font-weight: 700"
+                    >HIỆN HÀNH ✓</span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    background: #f0fdf4;
+                    border: 1px solid var(--ok);
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                  "
+                >
+                  <span>QĐ 401/2024 · <b>30 phút</b> — từ xa</span>
+                  <span style="color: var(--ok); font-weight: 700"
+                    >HIỆN HÀNH ✓</span
                   >
                 </div>
               </div>
@@ -1343,42 +1409,121 @@
                 >
                   Kỳ vọng cần chứng minh
                 </div>
-                <ul class="check" style="font-size: 13.5px; line-height: 1.35">
+                <ul class="check" style="font-size: 13px; line-height: 1.35">
                   <li>
-                    <b>15 phút</b> với máy trạm trong mạng nội bộ theo QĐ
-                    342/2024.
+                    Kết luận đúng: <b>15 phút</b> nội bộ · <b>30 phút</b> từ xa.
                   </li>
                   <li>
-                    <b>30 phút</b> với thiết bị làm việc từ xa theo QĐ 401/2024.
+                    Đề xuất 20 phút: <b>chưa thành quyết định</b> → 15 phút áp
+                    dụng nguyên trạng.
                   </li>
                   <li>
-                    Không chọn một con số duy nhất; phải phân biệt
-                    <b>phạm vi áp dụng</b>.
-                  </li>
-                  <li>
-                    Điều khoản ưu tiên của QĐ 401 chỉ áp dụng cho
-                    <b>mật khẩu và xác thực</b>, không áp dụng cho khóa phiên.
-                  </li>
-                  <li>
-                    QĐ 215/2022 đã bị thay thế; không dùng mốc 15 phút trong văn
-                    bản cũ làm căn cứ hiện hành.
+                    Dự thảo v3.0 và QĐ 215 cũ: nhận diện đúng trạng thái, không
+                    dùng làm căn cứ.
                   </li>
                 </ul>
+                <div
+                  style="
+                    margin-top: 10px;
+                    font-size: 12.5px;
+                    text-align: center;
+                    color: var(--muted);
+                    line-height: 1.45;
+                  "
+                >
+                  Một khái niệm · 5 nguồn · 4 trạng thái hiệu lực.<br />Raw RAG:
+                  chỉ thấy 3/5 nguồn — bỏ qua đề xuất 20 phút và bản bị thay
+                  thế.
+                </div>
               </div>
             </div>
             <div class="demo-shot" style="flex: 1">
               <img
-                src="demo/demo_1.png"
-                alt="So sánh Advanced RAG và Raw Vector RAG cho thời gian tự động khóa phiên"
+                src="demo/effective_aware.png"
+                alt="So sánh Advanced RAG và Raw Vector RAG khi nhiều nguồn cùng quy định thời gian khóa phiên với trạng thái hiệu lực khác nhau"
+                style="object-fit: contain"
               />
             </div>
           </div>
         </section>
 
-        <!-- ============ Slide 11 — Demo 2 ============ -->
+        <!-- ============ Slide 11 — Demo 2 (Multi-facet) ============ -->
         <section class="slide">
-          <div class="kicker">Demo 2 / 2</div>
-          <h1>Suy luận đa văn bản và nhiều yếu tố</h1>
+          <div class="kicker">Demo 2 / 3</div>
+          <h1>Multi-facet retrieval — một câu hỏi, năm khía cạnh, sáu văn bản</h1>
+          <div class="content" style="flex-direction: row; gap: 18px">
+            <div
+              style="
+                flex: 0 0 32%;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+              "
+            >
+              <div class="qcard" style="font-size: 13px; line-height: 1.4">
+                “Một nhân viên DDB làm việc từ xa dùng công cụ AI nội bộ để phân
+                tích hồ sơ KYC khách hàng: phiên làm việc từ xa tự động khóa sau
+                bao nhiêu phút; dùng dữ liệu khách hàng huấn luyện AI cần điều
+                kiện gì; hồ sơ KYC lưu trữ bao lâu; rò rỉ dữ liệu cá nhân phải
+                báo cáo NHNN trong bao lâu; và mức phạt chuyển dữ liệu cá nhân
+                ra nước ngoài trái phép?”
+              </div>
+              <div class="card" style="flex: 1">
+                <div
+                  style="
+                    font-size: 12px;
+                    font-weight: 800;
+                    letter-spacing: 0.1em;
+                    text-transform: uppercase;
+                    color: var(--muted);
+                    margin-bottom: 8px;
+                  "
+                >
+                  Kỳ vọng cần chứng minh
+                </div>
+                <ul class="check" style="font-size: 13px; line-height: 1.35">
+                  <li>
+                    <b>Khóa phiên từ xa:</b> 30 phút (QĐ 401/2024).
+                  </li>
+                  <li>
+                    <b>Huấn luyện AI:</b> đồng ý riêng (QĐ 455) / ẩn danh, lưu ≤
+                    24 tháng (QĐ 502).
+                  </li>
+                  <li><b>Hồ sơ KYC:</b> 10 năm (QĐ 480 / TT 20).</li>
+                  <li><b>Báo cáo rò rỉ NHNN:</b> trong 04 giờ (TT 09).</li>
+                  <li>
+                    <b>Phạt chuyển DLCN trái phép:</b> 200–300 triệu (NĐ 88).
+                  </li>
+                </ul>
+                <div
+                  style="
+                    margin-top: 10px;
+                    font-size: 12.5px;
+                    text-align: center;
+                    color: var(--muted);
+                    line-height: 1.45;
+                  "
+                >
+                  5 khía cạnh · 4 mảng nghiệp vụ · ≥6 văn bản — vượt sức chứa
+                  top-5.<br />Raw RAG: 3/5 — trả <b>“05 năm”</b> và
+                  <b>“72 giờ”</b> từ văn bản sai, kèm trích dẫn.
+                </div>
+              </div>
+            </div>
+            <div class="demo-shot" style="flex: 1">
+              <img
+                src="demo/demo_1.png"
+                alt="So sánh Advanced RAG và Raw Vector RAG cho câu hỏi năm khía cạnh xuyên bốn mảng nghiệp vụ"
+                style="object-fit: contain"
+              />
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ Slide 12 — Demo 3 (Chuỗi dẫn chiếu) ============ -->
+        <section class="slide">
+          <div class="kicker">Demo 3 / 3</div>
+          <h1>Truy vết relationship đa văn bản</h1>
           <div class="content" style="flex-direction: row; gap: 18px">
             <div
               style="
@@ -1389,9 +1534,28 @@
               "
             >
               <div class="qcard" style="font-size: 15.5px">
-                “Nhân viên DDB có được sử dụng laptop cá nhân và Wi-Fi công cộng
-                để truy cập hệ thống Core Banking khi làm việc từ xa không? Nếu
-                được thì phải đáp ứng những điều kiện bảo mật nào?”
+                “Hệ thống Core Banking gặp thảm họa phải khôi phục trong bao
+                lâu, và căn cứ nào xác định nó là hệ thống trọng yếu?”
+              </div>
+              <div
+                style="
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  gap: 2px;
+                "
+              >
+                <div class="node small">QĐ 356 · RTO ≤ 2h, RPO ≤ 15’</div>
+                <div style="font-size: 12px; color: var(--muted)">
+                  ▼ dẫn chiếu phân loại
+                </div>
+                <div class="node small">QĐ 173/2023 · tiêu chí trọng yếu</div>
+                <div style="font-size: 12px; color: var(--muted)">
+                  ▼ trỏ danh mục
+                </div>
+                <div class="node small navy">
+                  Phụ lục 02 — QĐ 215/2022 · Core Banking T24
+                </div>
               </div>
               <div class="card" style="flex: 1">
                 <div
@@ -1408,20 +1572,24 @@
                 </div>
                 <ul class="check" style="font-size: 13.5px; line-height: 1.35">
                   <li>
-                    <b>Chủ thể:</b> nhân viên được phê duyệt làm việc từ xa.
+                    <b>RTO tối đa 02 giờ, RPO 15 phút</b> cho hệ thống trọng yếu
+                    (QĐ 356).
                   </li>
                   <li>
-                    <b>Thiết bị:</b> BYOD chỉ qua VDI, không lưu dữ liệu cục bộ.
+                    Truy vết tới <b>QĐ 173/2023</b>: tiêu chí phân loại + điều
+                    khoản trỏ danh mục trọng yếu.
                   </li>
                   <li>
-                    <b>Kết nối:</b> Wi-Fi công cộng bắt buộc VPN có mã hóa.
+                    Đi tới đích <b>Phụ lục 02 QĐ 215/2022</b>: Core Banking T24
+                    — Cấp độ 4.
                   </li>
                   <li>
-                    <b>Xác thực:</b> MFA và chính sách mật khẩu hiện hành.
+                    Đối chiếu chuẩn NHNN: <b>TT 09/2024</b> — Cấp độ 3 trở lên
+                    là trọng yếu.
                   </li>
                   <li>
-                    <b>Hệ thống:</b> Core Banking là hệ thống trọng yếu Cấp độ
-                    4.
+                    Mỗi mắt xích của chuỗi có <b>trích dẫn riêng</b> — không suy
+                    diễn ngoài nguồn.
                   </li>
                 </ul>
                 <div
@@ -1433,14 +1601,16 @@
                     line-height: 1.45;
                   "
                 >
-                  QĐ 401 + QĐ 342 + TT 09<br />+ Phụ lục 02 QĐ 215
+                  Raw RAG: tìm được con số RTO nhưng <b>đứt chuỗi tại QĐ 173</b
+                  ><br />(thấy tên văn bản, không có nội dung để đi tiếp)
                 </div>
               </div>
             </div>
             <div class="demo-shot" style="flex: 1">
               <img
                 src="demo/demo_2.png"
-                alt="So sánh Advanced RAG và Raw Vector RAG cho tình huống truy cập Core Banking từ xa"
+                alt="So sánh Advanced RAG và Raw Vector RAG cho chuỗi dẫn chiếu RTO — phân loại — danh mục hệ thống trọng yếu"
+                style="object-fit: contain"
               />
             </div>
           </div>

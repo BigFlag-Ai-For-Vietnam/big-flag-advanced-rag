@@ -208,48 +208,51 @@ Context Precision | Context Recall | Answer Accuracy
 
 **Ghi chú nội bộ, không đưa lên slide:** `0.85 / 0.85 / 86%` là số user cung cấp cho deck, chưa phải kết quả benchmark có artifact trong repo. Cần thay hoặc xác nhận bằng MLflow run trước khi trình bày như kết quả đo thật.
 
-## Slide 10 — Demo 1: Văn bản thay đổi theo thời gian
+## Slide 10 — Demo 1: Time-aware (hiệu lực theo thời gian)
 
-**Case:** Một văn bản mới thay thế văn bản cũ nhưng vẫn giữ hiệu lực một phần nội dung.
+**Case:** Một khái niệm ("khóa phiên làm việc") xuất hiện trong **5 nguồn với 4 trạng thái hiệu lực khác nhau**: bản hiện hành (QĐ 342, QĐ 401), bản đã bị thay thế (QĐ 215), dự thảo chưa hiệu lực (DT ATTT v3.0 — 10 phút), và đề xuất trong biên bản họp chưa thành quyết định (BB UB ATTT Q2/2025 — nâng 15'→20'). Hệ thống phải trả giá trị **đang áp dụng** và phân định rõ trạng thái từng nguồn — không để dự thảo/đề xuất/bản cũ lẫn vào căn cứ.
 
-**Câu hỏi demo:** “Quy chế An toàn thông tin nào đang có hiệu lực và phần nào của văn bản cũ vẫn được áp dụng?”
+**Câu hỏi demo:** “Thời gian khóa phiên làm việc?”
 
-**Kỳ vọng cần chứng minh:**
-- Xác định QĐ 342/2024 là phiên bản hiện hành.
-- Nhận biết QĐ 215/2022 đã bị thay thế một phần.
-- Không bỏ sót Phụ lục 02 vẫn còn hiệu lực.
-- Hiển thị đoạn trích nguồn và quan hệ `THAY_THE` với thuộc tính partial.
+**Kỳ vọng cần chứng minh (Advanced đã cover trong demo run):**
+- Kết luận đúng: **15 phút** máy trạm nội bộ (QĐ 342) · **30 phút** thiết bị từ xa (QĐ 401).
+- Đề xuất 20 phút trong biên bản họp UB ATTT Q2/2025: nhận diện **chưa có quyết định sửa đổi → 15 phút áp dụng nguyên trạng**.
+- Dự thảo ATTT v3.0 (10 phút): nhận diện là **dự thảo lấy ý kiến, chưa hiệu lực** — không dùng.
+- QĐ 215/2022 (15 phút): nêu rõ **đã bị thay thế** bởi QĐ 342.
+- Đối chứng: Raw RAG chỉ thấy 3/5 nguồn — ra đúng giá trị 15'/30' nhưng **bỏ qua đề xuất 20' và bản bị thay thế**, không phân định vòng đời hiệu lực.
 
-**Bố cục:** Cột trái chiếm khoảng 30% cho câu hỏi và ba ý cần quan sát. Cột phải chiếm 70% để trống, có khung `PASTE DEMO SCREENSHOT HERE`. Ảnh sau này nên chứa câu trả lời, citations và graph facts; không dùng ảnh AI tạo.
+**Bố cục:** Cột trái ~30% gồm câu hỏi + bảng 5 nguồn với nhãn trạng thái (DỰ THẢO ✗ / CHƯA DUYỆT ✗ / BỊ THAY THẾ ✗ / HIỆN HÀNH ✓) + checklist. Cột phải là ảnh demo (`demo/effective_aware.png`).
 
-## Slide 11 — Demo 2: Conflict khi sử dụng dữ liệu cho AI
+## Slide 11 — Demo 2: Multi-facet retrieval
 
-**Case:** Hai văn bản cùng điều chỉnh việc sử dụng dữ liệu khách hàng để huấn luyện mô hình nhưng đưa ra điều kiện khác nhau và không tuyên bố ưu tiên.
+**Case:** Một câu hỏi tình huống chứa 5 khía cạnh trải trên 4 mảng nghiệp vụ (ATTT / AI / PCRT / dữ liệu cá nhân) và ≥6 văn bản — vượt sức chứa của một lần top-k retrieval. Raw RAG không "thiếu" mà **thay đáp án đúng bằng giá trị na ná từ văn bản sai, kèm trích dẫn** — loại lỗi nguy hiểm nhất với nghiệp vụ tuân thủ.
 
-**Câu hỏi demo:** “DDB có được sử dụng dữ liệu khách hàng để huấn luyện mô hình AI không?”
+**Câu hỏi demo:** “Một nhân viên DDB làm việc từ xa dùng công cụ AI nội bộ để phân tích hồ sơ KYC khách hàng: phiên làm việc từ xa tự động khóa sau bao nhiêu phút; dùng dữ liệu khách hàng huấn luyện AI cần điều kiện gì; hồ sơ KYC lưu trữ bao lâu; rò rỉ dữ liệu cá nhân phải báo cáo NHNN trong bao lâu; và mức phạt chuyển dữ liệu cá nhân ra nước ngoài trái phép?”
 
-**Kỳ vọng cần chứng minh:**
-- QĐ 455/2025 yêu cầu **sự đồng ý riêng** khi dùng dữ liệu cá nhân cho huấn luyện mô hình.
-- QĐ 502/2025 cho phép dùng dữ liệu giao dịch **đã ẩn danh**, lưu tối đa **24 tháng**, nhưng không nói rõ yêu cầu đồng ý.
-- Phát hiện đây là conflict/điểm chưa rõ thay vì tự kết luận một văn bản thắng.
-- Kéo thêm định nghĩa và căn cứ từ NĐ 88/2024 và TT 04/2025 để làm rõ câu hỏi: dữ liệu đã ẩn danh còn được xem là dữ liệu cá nhân hay không.
-- Trình bày cả hai hướng bằng chứng, cảnh báo người dùng và dẫn nguồn tương ứng.
+**Kỳ vọng cần chứng minh (Advanced đã cover đủ 5/5 trong demo run):**
+- **Khóa phiên từ xa:** 30 phút (QĐ 401/2024).
+- **Điều kiện huấn luyện AI:** đồng ý riêng (QĐ 455) / dữ liệu đã ẩn danh, lưu tối đa 24 tháng (QĐ 502).
+- **Hồ sơ KYC:** 10 năm (QĐ 480 / TT 20) — kèm carve-out "thay cho 05 năm của QĐ 455 vì pháp luật chuyên ngành".
+- **Báo cáo rò rỉ NHNN:** trong 04 giờ (TT 09) — phân biệt với 72 giờ thông báo chủ thể dữ liệu (NĐ 88).
+- **Phạt chuyển DLCN trái phép:** 200–300 triệu đồng (NĐ 88 Đ14).
+- Đối chứng: Raw RAG 3/5 — trả **"05 năm"** (nhầm hồ sơ tài khoản NĐ 88) và **"72 giờ"** (nhầm nghĩa vụ thông báo) một cách tự tin, có trích dẫn; nguồn top-5 co cụm vào 1–2 mảng, không với tới QĐ 480 và TT 09.
 
-**Bố cục:** Cột trái là câu hỏi và conflict rút gọn `Cần đồng ý riêng ↔ Được dùng nếu đã ẩn danh`. Cột phải là khung lớn `PASTE DEMO SCREENSHOT HERE`; ưu tiên ảnh có answer, citation cards của QĐ 455 và QĐ 502, cùng graph visualization nối sang NĐ 88 và TT 04.
+**Bố cục:** Cột trái ~32% gồm câu hỏi (font nhỏ hơn do dài) + checklist 5 khía cạnh + dòng đối chứng Raw. Cột phải là ảnh demo so sánh hai pipeline; không dùng ảnh AI tạo.
 
-## Slide 12 — Demo 3: Quan hệ đa văn bản
+## Slide 12 — Demo 3: Truy vết relationship đa văn bản
 
-**Case:** Câu trả lời yêu cầu đi qua chuỗi văn bản nội bộ và văn bản pháp luật bên ngoài.
+**Case:** Câu trả lời nằm ở cuối một chuỗi dẫn chiếu ba văn bản — văn bản đầu chuỗi chỉ chứa con số (RTO/RPO), còn vế "căn cứ nào" buộc phải đi qua hai văn bản nữa mới tới danh mục gốc.
 
-**Câu hỏi demo:** “Quy định An toàn thông tin của DDB dựa trên những văn bản pháp luật nào?”
+**Câu hỏi demo:** “Hệ thống Core Banking gặp thảm họa phải khôi phục trong bao lâu, và căn cứ nào xác định nó là hệ thống trọng yếu?”
 
-**Kỳ vọng cần chứng minh:**
-- Truy vết QĐ 342/2024 đến TT 09/2024/TT-NHNN.
-- Tiếp tục mở rộng từ TT 09/2024 đến NĐ 88/2024/NĐ-CP.
-- Phân biệt quan hệ graph dùng để suy luận với đoạn văn bản dùng để trích dẫn.
-- Trình bày được chuỗi căn cứ nhiều tầng cùng nguồn kiểm chứng.
+**Kỳ vọng cần chứng minh (Advanced đã cover trong demo run, lặp lại ổn định 2 lần):**
+- **RTO tối đa 02 giờ, RPO 15 phút** cho hệ thống trọng yếu (QĐ 356).
+- Truy vết chuỗi dẫn chiếu: QĐ 356 → **QĐ 173/2023** (tiêu chí phân loại + điều khoản trỏ danh mục) → **Phụ lục 02 QĐ 215/2022** (Core Banking T24 — Cấp độ 4).
+- Đối chiếu chuẩn Nhà nước: **TT 09/2024** — hệ thống Cấp độ 3 trở lên là trọng yếu.
+- Mỗi mắt xích của chuỗi có trích dẫn riêng — không suy diễn ngoài nguồn.
+- Đối chứng: Raw RAG tìm được con số RTO nhưng **đứt chuỗi tại QĐ 173** (thấy tên văn bản, tự nhận "nội dung không có trong ngữ cảnh") và vơ nhầm phân loại mức độ sự cố làm căn cứ.
 
-**Bố cục:** Bên trái là câu hỏi và chuỗi quan hệ rút gọn. Bên phải là khung `PASTE DEMO SCREENSHOT HERE`; ưu tiên ảnh Knowledge Graph visualization kết hợp câu trả lời và citations.
+**Bố cục:** Cột trái ~30% gồm câu hỏi + chuỗi dẫn chiếu rút gọn `QĐ 356 → QĐ 173 → Phụ lục 02 QĐ 215` + checklist kỳ vọng. Cột phải là ảnh demo so sánh hai pipeline; không dùng ảnh AI tạo.
 
 ## Slide 13 — Thank You
 

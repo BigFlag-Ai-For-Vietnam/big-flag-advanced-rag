@@ -174,30 +174,56 @@ Hybrid Technique, còn `Observe` thực hiện sufficiency check trên từng su
 Corpus là dữ liệu **mô phỏng của DongDoBank (DDB)**, không phải dữ liệu thật của SHB. Luôn
 ghi “Ví dụ mô phỏng” khi nội dung corpus xuất hiện trên slide.
 
-### Demo 1 — Văn bản thay đổi theo thời gian
+### Demo 1 — Time-aware (hiệu lực theo thời gian)
 
-- QĐ 342/2024 thay thế QĐ 215/2022 về An toàn thông tin.
-- Đây là thay thế một phần: Phụ lục 02 của QĐ 215 vẫn còn hiệu lực.
-- Câu hỏi: “Quy chế An toàn thông tin nào đang có hiệu lực và phần nào của văn bản cũ vẫn
-  được áp dụng?”
-- Kỳ vọng: QĐ 342 là bản hiện hành; QĐ 215 bị thay thế một phần; Phụ lục 02 vẫn được giữ.
+- Một khái niệm ("khóa phiên làm việc") có 5 nguồn với 4 trạng thái hiệu lực khác nhau:
+  QĐ 342 (15' nội bộ — hiện hành), QĐ 401 (30' từ xa — hiện hành), QĐ 215 (15' — đã bị
+  thay thế), DT ATTT v3.0 (10' — dự thảo chưa hiệu lực), BB UB ATTT Q2/2025 (đề xuất nâng
+  15'→20' — chưa thành quyết định, biên bản ghi rõ "chưa có quyết định sửa đổi thì 15 phút
+  áp dụng nguyên trạng").
+- Câu hỏi: "Thời gian khóa phiên làm việc?"
+- Kết quả đã chạy thật: **Advanced** phân định đủ cả 5 nguồn đúng trạng thái (kết luận
+  15'/30'; nêu đề xuất 20' chưa duyệt; gắn nhãn dự thảo chưa hiệu lực; nêu QĐ 215 bị thay
+  thế). **Raw** ra đúng giá trị 15'/30' nhưng chỉ thấy 3/5 nguồn — bỏ qua biên bản họp và
+  bản bị thay thế, không phân định vòng đời hiệu lực.
+- Ảnh demo: `demo/effective_aware.png`.
+- Lưu ý khi trình bày: đối chứng ở đây là **độ phủ vòng đời hiệu lực**, không phải sai/đúng
+  giá trị — không claim raw trả lời sai ở case này.
 
-### Demo 2 — Conflict khi sử dụng dữ liệu cho AI
+### Demo 2 — Multi-facet retrieval
 
-- QĐ 455/2025 yêu cầu sự đồng ý riêng khi dùng dữ liệu cá nhân cho huấn luyện mô hình.
-- QĐ 502/2025 cho phép dùng dữ liệu giao dịch đã ẩn danh trong tối đa 24 tháng, nhưng không
-  nói rõ yêu cầu đồng ý.
-- Hai văn bản không tuyên bố ưu tiên tại điểm này.
-- Câu hỏi: “DDB có được sử dụng dữ liệu khách hàng để huấn luyện mô hình AI không?”
-- Kỳ vọng: nêu cả hai hướng bằng chứng, cảnh báo điểm chưa rõ và kéo thêm NĐ 88/2024 cùng
-  TT 04/2025 để phân tích dữ liệu đã ẩn danh còn là dữ liệu cá nhân hay không.
+- Câu hỏi tình huống 5 khía cạnh trải trên 4 mảng nghiệp vụ (ATTT / AI / PCRT / DLCN) và
+  ≥6 văn bản: khóa phiên từ xa (QĐ 401), điều kiện huấn luyện AI (QĐ 455 + QĐ 502), lưu
+  hồ sơ KYC (QĐ 480/TT 20), báo cáo rò rỉ NHNN (TT 09), phạt chuyển DLCN (NĐ 88).
+- Cơ chế: 5 ý trộn thành 1 vector → top-5 của Raw RAG co cụm vào 1–2 mảng khớp nhất,
+  không với tới QĐ 480 và TT 09; thay vì nói "không tìm thấy", nó lấy giá trị na ná trong
+  văn bản sai (nguyên lý chuồng bồ câu: 5 chunk < 6 văn bản cần).
+- Câu hỏi: “Một nhân viên DDB làm việc từ xa dùng công cụ AI nội bộ để phân tích hồ sơ
+  KYC khách hàng: phiên làm việc từ xa tự động khóa sau bao nhiêu phút; dùng dữ liệu
+  khách hàng huấn luyện AI cần điều kiện gì; hồ sơ KYC lưu trữ bao lâu; rò rỉ dữ liệu cá
+  nhân phải báo cáo NHNN trong bao lâu; và mức phạt chuyển dữ liệu cá nhân ra nước ngoài
+  trái phép?”
+- Kết quả đã chạy thật: **Advanced 5/5** (kèm carve-out 10-vs-5-năm và phân biệt 04 giờ
+  báo sự cố NHNN vs 72 giờ thông báo chủ thể); **Raw 3/5** — trả sai tự tin "05 năm"
+  (nhầm hồ sơ tài khoản NĐ 88) và "72 giờ" (nhầm nghĩa vụ thông báo), đều kèm trích dẫn.
+- Đã kiểm chứng bằng SQLite: "04 giờ" chỉ có trong TT 09, "10 (mười) năm" chỉ có trong
+  QĐ 480/TT 20 — hai chunk mà Raw không retrieve được trong run demo.
+- Lưu ý: bản rút gọn 3 khía cạnh của câu này ĐÃ THỬ và mất tác dụng (bẫy KYC xẹp vì
+  keyword đậm hơn) — giữ nguyên bản 5 khía cạnh, không rút gọn.
 
-### Demo 3 — Quan hệ đa văn bản
+### Demo 3 — Truy vết relationship đa văn bản
 
-- QĐ 342/2024 tuân thủ/căn cứ TT 09/2024/TT-NHNN.
-- TT 09/2024 tiếp tục căn cứ NĐ 88/2024/NĐ-CP.
-- Câu hỏi: “Quy định An toàn thông tin của DDB dựa trên những văn bản pháp luật nào?”
-- Kỳ vọng: truy vết được chuỗi QĐ 342 → TT 09 → NĐ 88 và vẫn có đoạn nguồn kiểm chứng.
+- QĐ 356 quy định mục tiêu khôi phục sau thảm họa (RTO tối đa 02 giờ, RPO 15 phút) cho hệ
+  thống trọng yếu. (Văn bản này thuộc nhóm bổ sung sau bộ 10 PDF gốc trong GROUND_TRUTH.md.)
+- Vế "căn cứ xác định trọng yếu" KHÔNG nằm trong QĐ 356: phải đi tiếp QĐ 173/2023 (tiêu chí
+  phân loại, điều khoản trỏ danh mục) rồi tới Phụ lục 02 QĐ 215/2022 (Core Banking T24 —
+  Cấp độ 4); đối chiếu thêm TT 09/2024 (Cấp độ 3 trở lên là trọng yếu).
+- Câu hỏi: “Hệ thống Core Banking gặp thảm họa phải khôi phục trong bao lâu, và căn cứ nào
+  xác định nó là hệ thống trọng yếu?”
+- Kỳ vọng: trả đủ RTO/RPO và đi trọn chuỗi 3 văn bản, mỗi mắt xích có trích dẫn riêng.
+- Kết quả đã chạy thật (2 lần, ổn định): Advanced giữ nguyên chuỗi QĐ 173 → PL02 QĐ 215 +
+  TT 09 cả 2 lần; Raw RAG cả 2 lần tìm được RTO nhưng đứt chuỗi tại QĐ 173 (tự nhận "nội
+  dung không có trong ngữ cảnh") và thế nhầm phân loại mức độ sự cố (QĐ 428) làm căn cứ.
 
 ## 5. Evaluation: điều đã có và điều chưa có
 
