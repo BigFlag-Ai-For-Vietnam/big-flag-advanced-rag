@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BigRAG — Pitch Deck</title>
+<style>
+  :root {
+    --navy: #0e2a47;
+    --navy-2: #123a63;
+    --ink: #1e293b;
+    --muted: #64748b;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --raw: #2563eb;      /* Raw Evidence lane */
+    --raw-bg: #eff6ff;
+    --graph: #7c3aed;    /* Graph Context lane */
+    --graph-bg: #f5f3ff;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --accent: #0ea5a4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #0b1220; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+
+  .viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .stage { width: 1280px; height: 720px; position: relative; flex: none; }
+
+  .slide { position: absolute; inset: 0; display: none; flex-direction: column;
+    background: var(--bg); color: var(--ink); padding: 48px 64px; border-radius: 6px; overflow: hidden; }
+  .slide.active { display: flex; }
+  .slide.dark { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 60%, #16537e 100%); color: #fff; }
+
+  .kicker { font-size: 15px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+  h1 { font-size: 30px; font-weight: 800; color: var(--navy); line-height: 1.25; }
+  .slide.dark h1 { color: #fff; }
+  .subtitle { font-size: 18px; color: var(--muted); margin-top: 6px; }
+  .content { flex: 1; display: flex; flex-direction: column; margin-top: 24px; min-height: 0; }
+
+  ul.bullets { list-style: none; font-size: 20px; line-height: 1.5; }
+  ul.bullets li { padding: 9px 0 9px 30px; position: relative; }
+  ul.bullets li::before { content: "▸"; position: absolute; left: 4px; color: var(--accent); font-weight: 700; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+
+  /* flow diagram primitives */
+  .flow { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: nowrap; }
+  .node { background: var(--card); border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 14px;
+    font-size: 15px; font-weight: 600; text-align: center; color: var(--ink); white-space: nowrap; }
+  .node.small { font-size: 13px; padding: 8px 10px; }
+  .node.navy { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .node.raw { background: var(--raw-bg); border-color: var(--raw); color: var(--raw); }
+  .node.graphn { background: var(--graph-bg); border-color: var(--graph); color: var(--graph); }
+  .node.dashed { border-style: dashed; }
+  .arrow { color: #94a3b8; font-size: 20px; font-weight: 700; flex: none; }
+  .lane-label { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+  .lane-label.raw-l { color: var(--raw); }
+  .lane-label.graph-l { color: var(--graph); }
+
+  .footnote { font-size: 13px; color: var(--muted); margin-top: auto; padding-top: 12px; }
+
+  .cols { display: flex; gap: 20px; flex: 1; min-height: 0; }
+  .cols > * { flex: 1; min-width: 0; }
+
+  .placeholder { border: 2.5px dashed #cbd5e1; border-radius: 14px; background: repeating-linear-gradient(
+      -45deg, #f1f5f9, #f1f5f9 14px, #f8fafc 14px, #f8fafc 28px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8;
+    font-weight: 700; font-size: 20px; letter-spacing: .05em; text-align: center; gap: 8px; }
+  .placeholder small { font-weight: 500; font-size: 13px; letter-spacing: 0; }
+
+  .check { list-style: none; font-size: 15.5px; line-height: 1.45; }
+  .check li { padding: 6px 0 6px 28px; position: relative; }
+  .check li::before { content: "✓"; position: absolute; left: 2px; color: var(--ok); font-weight: 800; }
+
+  .qcard { background: var(--navy); color: #fff; border-radius: 12px; padding: 16px 18px; font-size: 17px;
+    line-height: 1.45; font-style: italic; }
+  .qcard::before { content: "Câu hỏi demo"; display: block; font-style: normal; font-size: 12px; font-weight: 800;
+    letter-spacing: .1em; text-transform: uppercase; color: #7dd3fc; margin-bottom: 6px; }
+
+  .hud { position: fixed; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 14px;
+    padding: 10px 18px; color: #94a3b8; font-size: 13px; z-index: 10;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .hud .bar-wrap { flex: 1; height: 3px; background: #1e293b; border-radius: 2px; }
+  .hud .bar { height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .2s; }
+  .hud button { background: #1e293b; color: #cbd5e1; border: none; border-radius: 6px; padding: 5px 12px;
+    font-size: 14px; cursor: pointer; }
+  .hud button:hover { background: #334155; }
+</style>
+</head>
+<body>
+
+<div class="viewport"><div class="stage" id="stage">
+
+<!-- ============ Slide 1 — Title ============ -->
+<section class="slide dark" style="align-items:center; justify-content:center; text-align:center;">
+  <div style="font-size:76px; font-weight:900; letter-spacing:-.02em;">Big<span style="color:#38bdf8;">RAG</span></div>
+  <div style="font-size:26px; font-weight:600; margin-top:18px; color:#e2e8f0;">Advanced RAG for Complex Banking Document Intelligence</div>
+  <div style="font-size:19px; margin-top:28px; color:#7dd3fc; font-weight:500;">Hiểu đúng quy định&ensp;—&ensp;Theo đúng liên kết&ensp;—&ensp;Trả lời có căn cứ</div>
+</section>
+
+<!-- ============ Slide 2 — Bối cảnh ============ -->
+<section class="slide">
+  <div class="kicker">Vấn đề</div>
+  <h1>Kho tri thức ngân hàng ngày càng phức tạp</h1>
+  <div class="content" style="flex-direction:row; gap:36px; align-items:center;">
+    <div style="flex:1.1;">
+      <ul class="bullets">
+        <li>Khối lượng lớn văn bản nội bộ và bên ngoài: <b>quy định, quy trình, thông tư, nghị định, biểu mẫu, hướng dẫn nghiệp vụ</b>.</li>
+        <li>Thông tin liên quan đến một câu hỏi thường <b>phân tán trong nhiều văn bản</b>.</li>
+        <li>Cùng một chủ đề tồn tại trong <b>nhiều phiên bản khác nhau</b> theo thời gian.</li>
+        <li><b>Ví dụ:</b> nhiều văn bản cùng quy định một chủ thể nhưng khác nội dung, phạm vi hay điều kiện — tạo ra <b>conflict khi áp dụng</b>.</li>
+      </ul>
+    </div>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center;">
+      <div style="position:relative; width:420px; height:340px;">
+        <div class="node small" style="position:absolute; top:0; left:10px;">📄 Quy định nội bộ</div>
+        <div class="node small" style="position:absolute; top:0; right:10px;">📑 Thông tư</div>
+        <div class="node small" style="position:absolute; top:80px; left:0;">📋 Quy trình</div>
+        <div class="node small" style="position:absolute; top:80px; right:0;">📜 Nghị định</div>
+        <div class="node small" style="position:absolute; top:160px; left:24px;">🗂 Biểu mẫu</div>
+        <div class="node small" style="position:absolute; top:160px; right:24px;">📘 Hướng dẫn</div>
+        <div style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); text-align:center;">
+          <div style="font-size:56px;">🧑‍💼</div>
+          <div style="font-size:14px; font-weight:600; color:var(--muted);">Nhân viên ngân hàng<br>đang tìm kiếm thông tin</div>
+        </div>
+        <div style="position:absolute; top:210px; left:50%; transform:translateX(-50%); color:#94a3b8; font-size:26px;">⤋ ⤋ ⤋</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Slide 3 — Ba bài toán nghiệp vụ ============ -->
+<section class="slide">
+  <div class="kicker">Vấn đề</div>
+  <h1>Tìm thấy tài liệu chưa đồng nghĩa với tìm được quy định đúng</h1>
+  <div class="content" style="flex-direction:row; gap:18px;">
+    <!-- Card 1: Timeline -->
+    <div class="card" style="flex:1; display:flex; flex-direction:column;">
+      <div style="font-size:18px; font-weight:800; color:var(--navy);">⏱ Thay đổi theo thời gian</div>
+      <div style="font-size:14.5px; color:var(--muted); margin-top:6px;">Văn bản có thể được sửa đổi hoặc thay thế toàn bộ hay một phần.</div>
+      <div style="margin-top:14px; flex:1;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div class="node small" style="text-decoration:line-through; color:#94a3b8;">QĐ 215/2022<br>ATTT v1.0</div>
+          <span class="arrow">→</span>
+          <div class="node small navy">QĐ 342/2024<br>ATTT v2.0</div>
+        </div>
+        <div class="node small" style="margin-top:12px; border-color:var(--ok); color:var(--ok); background:#f0fdf4; white-space:normal;">
+          ✔ Phụ lục 02 — Danh mục hệ thống trọng yếu <b>vẫn còn hiệu lực</b>
+        </div>
+      </div>
+      <div style="font-size:13px; margin-top:12px; color:var(--ink);"><b>Ví dụ:</b> QĐ 342/2024 thay thế QĐ 215/2022, nhưng Phụ lục 02 của văn bản cũ vẫn áp dụng.</div>
+    </div>
+    <!-- Card 2: Overlap -->
+    <div class="card" style="flex:1; display:flex; flex-direction:column;">
+      <div style="font-size:18px; font-weight:800; color:var(--navy);">⚖️ Quy định chồng lấn</div>
+      <div style="font-size:14.5px; color:var(--muted); margin-top:6px;">Nhiều văn bản cùng đề cập một vấn đề nhưng khác giá trị, phạm vi, đối tượng.</div>
+      <div style="margin-top:14px; flex:1; text-align:center;">
+        <div style="display:flex; justify-content:center; gap:10px;">
+          <div class="node small">QĐ 342/2024<br><span style="color:var(--raw);">12 ký tự</span></div>
+          <div class="node small">QĐ 401/2024<br><span style="color:var(--graph);">8 ký tự</span></div>
+        </div>
+        <div style="font-size:18px; color:#94a3b8; margin:2px 0;">↘ &ensp; ↙</div>
+        <div class="node small" style="display:inline-block;">⚠️ Độ dài mật khẩu — conflict</div>
+        <div style="font-size:12px; color:var(--muted); font-weight:700; margin:2px 0;">↓ Ưu tiên QĐ 342</div>
+        <div class="node small" style="display:inline-block; border-color:var(--ok); color:var(--ok); background:#f0fdf4;">Áp dụng 12 ký tự</div>
+      </div>
+      <div style="font-size:13px; margin-top:12px; color:var(--ink);"><b>Ví dụ:</b> QĐ 401 quy định khi khác biệt thì ưu tiên QĐ 342 → kết luận đúng là <b>12 ký tự</b>.</div>
+    </div>
+    <!-- Card 3: Relationship -->
+    <div class="card" style="flex:1; display:flex; flex-direction:column;">
+      <div style="font-size:18px; font-weight:800; color:var(--navy);">🕸 Quan hệ đa văn bản</div>
+      <div style="font-size:14.5px; color:var(--muted); margin-top:6px;">Câu trả lời nằm trong chuỗi liên kết giữa nghị định, thông tư và quy định nội bộ.</div>
+      <div style="margin-top:14px; flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;">
+        <div class="node small">NĐ 88/2024/NĐ-CP</div>
+        <div style="font-size:12px; color:var(--muted);">▲ căn cứ</div>
+        <div class="node small">TT 09/2024/TT-NHNN</div>
+        <div style="font-size:12px; color:var(--muted);">▲ tuân thủ</div>
+        <div class="node small navy">QĐ 342/2024/QĐ-DDB</div>
+      </div>
+      <div style="font-size:13px; margin-top:12px; color:var(--ink);"><b>Ví dụ:</b> QĐ 342/2024 tuân thủ TT 09/2024; TT 09/2024 căn cứ NĐ 88/2024.</div>
+    </div>
+  </div>
+  <div class="footnote">Ví dụ mô phỏng từ bộ tài liệu tuân thủ DongDoBank (DDB).</div>
+</section>
+
+<!-- ============ Slide 4 — Vì sao RAG truyền thống chưa đủ ============ -->
+<section class="slide">
+  <div class="kicker">Vấn đề</div>
+  <h1>Vì sao RAG truyền thống chưa đủ?</h1>
+  <div class="subtitle">RAG truyền thống tìm các đoạn giống câu hỏi, nhưng chưa thực sự hiểu quan hệ giữa chúng</div>
+  <div class="content" style="justify-content:center;">
+    <ul class="bullets" style="font-size:22px; max-width:960px;">
+      <li>Truy xuất từng đoạn tài liệu <b>riêng lẻ</b>.</li>
+      <li>Khó theo dõi <b>liên kết giữa nhiều văn bản</b>.</li>
+      <li>Kết quả top-k có thể <b>bỏ sót một khía cạnh</b> của câu hỏi.</li>
+      <li>Nguy cơ sử dụng <b>nội dung cũ</b> hoặc thiếu <b>phạm vi áp dụng</b>.</li>
+      <li>LLM vẫn có thể tổng hợp câu trả lời dù <b>bằng chứng chưa đầy đủ</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ Slide 5 — Giải pháp BigRAG ============ -->
+<section class="slide">
+  <div class="kicker">Giải pháp</div>
+  <h1>BigRAG — Hai lớp bằng chứng, một quy trình suy luận có kiểm soát</h1>
+  <div class="content" style="gap:22px;">
+    <div style="display:flex; gap:16px;">
+      <div class="card" style="flex:1;"><b style="color:var(--raw);">Chunk-based Hybrid RAG</b><div style="font-size:14.5px; margin-top:6px; color:var(--muted);">Tìm chính xác nội dung, số liệu và điều khoản bằng Dense Search + BM25.</div></div>
+      <div class="card" style="flex:1;"><b style="color:var(--graph);">Knowledge Graph</b><div style="font-size:14.5px; margin-top:6px; color:var(--muted);">Bổ sung quan hệ giữa văn bản, khái niệm và các giá trị quy định.</div></div>
+      <div class="card" style="flex:1;"><b style="color:var(--navy);">Agentic Planner–Executor–Sufficiency Checker</b><div style="font-size:14.5px; margin-top:6px; color:var(--muted);">Lập kế hoạch, thực thi truy xuất theo từng mục tiêu và kiểm tra bằng chứng đã đủ trước khi tổng hợp.</div></div>
+    </div>
+    <div class="card" style="flex:1; display:flex; align-items:center; justify-content:center; padding:24px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="node">Câu hỏi</div>
+        <span class="arrow">→</span>
+        <div class="node navy">Agentic<br>Planner</div>
+        <span class="arrow">→</span>
+        <div class="node navy">Executor</div>
+        <span class="arrow">→</span>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div style="display:flex; align-items:center; gap:10px; background:var(--raw-bg); border-radius:10px; padding:10px 14px;">
+            <div class="node raw small">Hybrid Chunk Retrieval</div><span class="arrow">→</span>
+            <div class="node raw small">Đoạn trích nguyên văn<br><span style="font-weight:500;">(Raw Evidence)</span></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; background:var(--graph-bg); border-radius:10px; padding:10px 14px;">
+            <div class="node graphn small">Knowledge Graph</div><span class="arrow">→</span>
+            <div class="node graphn small">Quan hệ và ngữ cảnh<br><span style="font-weight:500;">(Graph Context)</span></div>
+          </div>
+        </div>
+        <span class="arrow">→</span>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+          <div class="node">Sufficiency<br>Checker</div>
+          <div style="font-size:12.5px; color:var(--warn); font-weight:700;">↺ thiếu → truy xuất lại</div>
+          <span class="arrow" style="transform:rotate(90deg);">→</span>
+          <div class="node navy">Câu trả lời + nguồn dẫn</div>
+        </div>
+      </div>
+    </div>
+    <div class="footnote" style="padding-top:0;">Hai lane tách màu: <b style="color:var(--raw);">Raw Evidence</b> — đoạn văn bản có thể trích dẫn; <b style="color:var(--graph);">Graph Context</b> — quan hệ dùng để suy luận, không trình bày như trích dẫn nguyên văn.</div>
+  </div>
+</section>
+
+<!-- ============ Slide 6 — Document Intelligence Pipeline ============ -->
+<section class="slide">
+  <div class="kicker">Giải pháp</div>
+  <h1>Production Parsing &amp; Chunking Flow</h1>
+  <div class="subtitle">Tạo ra các chunk self-contained, context-aware và sẵn sàng cho production retrieval</div>
+  <div class="content" style="gap:18px;">
+    <div class="card" style="padding:16px;">
+      <div class="flow">
+        <div class="node small">📄 PDF</div><span class="arrow">→</span>
+        <div class="node small">VLM đọc từng trang</div><span class="arrow">→</span>
+        <div class="node small">Sentence-aware Chunking</div><span class="arrow">→</span>
+        <div class="node small navy">Contextual Enrichment<br><span style="font-weight:500; font-size:12px;">LLM thêm 1–2 câu định vị / chunk</span></div>
+      </div>
+    </div>
+    <div style="display:flex; gap:18px; flex:1;">
+      <div class="card" style="flex:1;">
+        <div class="lane-label raw-l">Nhánh 1 · Search Index</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px;"><div class="node raw small">Embed</div><span class="arrow">→</span><div class="node raw small">Qdrant Dense Index</div></div>
+          <div style="display:flex; align-items:center; gap:8px;"><div class="node raw small">SQLite Chunks</div><span class="arrow">→</span><div class="node raw small">BM25 khi truy vấn</div></div>
+          <div class="node raw small" style="align-self:flex-start;">Catalog theo facet</div>
+        </div>
+      </div>
+      <div class="card" style="flex:1.25; border-style:dashed;">
+        <div class="lane-label graph-l">Nhánh 2 · Knowledge Graph &ensp;<span style="font-weight:600; color:var(--muted); text-transform:none; letter-spacing:0;">(chạy nền — không chặn RAG)</span></div>
+        <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-start;">
+          <div style="display:flex; align-items:center; gap:8px;"><div class="node graphn small dashed">LightRAG Extraction</div><span class="arrow">→</span><div class="node graphn small dashed">Ontology Validation</div></div>
+          <div style="display:flex; align-items:center; gap:8px;"><div class="node graphn small dashed">Entity Resolution + Citation Linking</div><span class="arrow">→</span><div class="node graphn small">Neo4j Knowledge Graph</div></div>
+        </div>
+        <div style="font-size:13px; color:var(--muted); margin-top:10px;">Ontology giới hạn graph vào ba nhóm: <b>Văn bản – Khái niệm – Giá trị quy định</b>.</div>
+      </div>
+    </div>
+    <ul class="bullets" style="font-size:15px;">
+      <li><code>SentenceSplitter</code> giữ ngữ cảnh lân cận bằng chunk overlap; mỗi chunk có nghĩa khi đứng độc lập nhờ contextual prefix.</li>
+      <li>Graph xây bất đồng bộ — chunk-based RAG sẵn sàng phục vụ ngay khi index xong.</li>
+      <li><b>Kết luận:</b> mỗi chunk mang theo tên tài liệu, chủ thể và vị trí điều khoản — đứng độc lập mà vẫn giữ đúng context khi được truy xuất.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ Slide 7 — Hybrid Retrieval ============ -->
+<section class="slide">
+  <div class="kicker">Giải pháp</div>
+  <h1>Hybrid Technique kết hợp RAG và Graph</h1>
+  <div class="subtitle">Graph cung cấp relationship baseline — Contextual Chunk RAG cung cấp bằng chứng chính xác để trả lời</div>
+  <div class="content" style="gap:16px;">
+    <div class="card" style="background:var(--raw-bg); border-color:var(--raw);">
+      <div class="lane-label raw-l">Lane 1 · Contextual Chunk RAG — nội dung chính xác để trả lời và trích dẫn</div>
+      <div class="flow" style="justify-content:flex-start;">
+        <div class="node small">Query</div><span class="arrow">→</span>
+        <div class="node small">Contextual RAG</div><span class="arrow">→</span>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <div class="node raw small">🔍 Qdrant / Dense Search</div>
+          <div class="node raw small">🔡 SQLite / BM25</div>
+        </div>
+        <span class="arrow">→</span><div class="node raw">Exact Raw Evidence</div>
+      </div>
+    </div>
+    <div class="card" style="background:var(--graph-bg); border-color:var(--graph);">
+      <div class="lane-label graph-l">Lane 2 · Knowledge Graph — relationship baseline để mở rộng phạm vi tìm kiếm</div>
+      <div class="flow" style="justify-content:flex-start;">
+        <div class="node small">Query</div><span class="arrow">→</span>
+        <div class="node graphn small">🕸 Neo4j<br>Knowledge Graph</div><span class="arrow">→</span>
+        <div class="node graphn small">Document + Concept + Value<br>Relationships</div>
+        <span class="arrow">→</span><div class="node graphn">Relationship Baseline<br><span style="font-weight:500; font-size:12px;">Graph Facts — đối chiếu, suy luận</span></div>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; gap:12px;">
+      <span class="arrow" style="transform:rotate(90deg);">→</span>
+      <div class="node navy">Hybrid Evidence</div>
+    </div>
+    <div class="footnote" style="text-align:center; font-size:16px; font-style:italic; color:var(--navy); padding-top:4px;">
+      “Raw evidence provides precision. Graph context provides completeness.”
+    </div>
+  </div>
+</section>
+
+<!-- ============ Slide 8 — Agentic Reasoning ============ -->
+<section class="slide">
+  <div class="kicker">Giải pháp</div>
+  <h1>ReAct-style Agentic RAG</h1>
+  <div class="subtitle">Plan → Break Sub-queries → Retrieve → Sufficiency Check → Synthesize — kiểm soát bằng LangGraph</div>
+  <div class="content" style="flex-direction:row; gap:32px; align-items:center;">
+    <div style="flex:1;">
+      <ul class="bullets" style="font-size:16px;">
+        <li><b>Planning:</b> hiểu câu hỏi và chia thành các sub-query độc lập.</li>
+        <li><b>Act / Retrieve:</b> gọi Hybrid Technique cho từng sub-query.</li>
+        <li><b>Observe / Sufficiency Check:</b> mỗi mục tiêu đã đủ raw evidence và relationship context chưa?</li>
+        <li><b>Re-plan:</b> nếu thiếu, bổ sung hướng tìm kiếm rồi truy xuất lại trong giới hạn budget.</li>
+        <li><b>Synthesize:</b> hợp nhất kết quả tất cả sub-query, tạo câu trả lời và nguồn dẫn.</li>
+        <li>Hết budget mà vẫn thiếu → phần thiếu được <b>đánh dấu rõ</b>, mô hình không tự suy diễn.</li>
+      </ul>
+    </div>
+    <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div class="node small">Question</div><span class="arrow">→</span>
+        <div class="node small navy">PLAN<br><span style="font-weight:500; font-size:11px;">break sub-queries</span></div>
+      </div>
+      <span class="arrow" style="transform:rotate(90deg);">→</span>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+          <div class="node" style="border-color:var(--accent);">ACT — Hybrid Retrieval<br><span style="font-weight:500; font-size:11px;">per sub-query</span></div>
+          <span class="arrow" style="transform:rotate(90deg);">→</span>
+          <div class="node" style="border-color:var(--accent);">OBSERVE — Sufficiency Checker</div>
+        </div>
+        <div style="border:1.5px dashed var(--warn); border-radius:10px; padding:8px 10px; font-size:12.5px; color:var(--warn); font-weight:700; text-align:center;">↺ Missing<br>Re-plan</div>
+      </div>
+      <div style="font-size:12.5px; color:var(--muted); font-weight:600;">Sufficient / Budget reached ↓</div>
+      <div class="node small">SYNTHESIZE — hợp nhất tất cả sub-query</div>
+      <span class="arrow" style="transform:rotate(90deg);">→</span>
+      <div class="node navy">Answer + Citations</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Slide 9 — Đánh giá hệ thống ============ -->
+<section class="slide">
+  <div class="kicker">Đánh giá</div>
+  <h1>Đánh giá khả năng lấy đúng và lấy đủ context cho ba pain point nghiệp vụ</h1>
+  <div class="content" style="flex-direction:row; gap:24px;">
+    <div style="flex:1;">
+      <ul class="bullets" style="font-size:15px;">
+        <li>Testset gồm <b>ba nhóm câu hỏi</b>: văn bản <b>sửa đổi / thay thế một phần</b>; nội dung <b>chồng lấn / conflict</b> giữa nhiều văn bản cùng chủ thể; truy vết <b>relationship qua nhiều tầng</b> văn bản.</li>
+        <li>Benchmark <b>BigRAG Full Pipeline</b> trên toàn bộ testset.</li>
+        <li>Chấm bằng <b>RAGAS</b>; trace và breakdown lưu trên <b>MLflow</b>.</li>
+      </ul>
+      <div style="display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:14px;">
+        <div class="node small">Indexed Documents</div>
+        <span class="arrow" style="transform:rotate(90deg); font-size:15px;">→</span>
+        <div class="node small">Testset: Versioning · Conflict · Cross-document Relationship</div>
+        <span class="arrow" style="transform:rotate(90deg); font-size:15px;">→</span>
+        <div class="node small navy">BigRAG Full Pipeline</div>
+        <span class="arrow" style="transform:rotate(90deg); font-size:15px;">→</span>
+        <div class="node small">RAGAS + MLflow</div>
+      </div>
+    </div>
+    <div style="flex:1; display:flex; flex-direction:column; gap:14px; justify-content:center;">
+      <div style="display:flex; gap:12px;">
+        <div class="card" style="flex:1; text-align:center; padding:22px 14px;">
+          <div style="font-size:13px; font-weight:800; color:var(--navy);">Context Precision</div>
+          <div style="font-size:42px; font-weight:900; color:var(--ink); margin-top:6px; font-variant-numeric:tabular-nums;">0.85</div>
+        </div>
+        <div class="card" style="flex:1; text-align:center; padding:22px 14px;">
+          <div style="font-size:13px; font-weight:800; color:var(--navy);">Context Recall</div>
+          <div style="font-size:42px; font-weight:900; color:var(--ink); margin-top:6px; font-variant-numeric:tabular-nums;">0.85</div>
+        </div>
+        <div class="card" style="flex:1; text-align:center; padding:22px 14px; border-color:#7c3aed;">
+          <div style="font-size:13px; font-weight:800; color:#7c3aed;">Answer Accuracy</div>
+          <div style="font-size:42px; font-weight:900; color:var(--ink); margin-top:6px; font-variant-numeric:tabular-nums;">86%</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <span style="border:1px solid var(--line); border-radius:999px; padding:3px 12px; font-size:12px; font-weight:700; color:var(--muted); background:var(--card);">Versioning</span>
+        <span style="border:1px solid var(--line); border-radius:999px; padding:3px 12px; font-size:12px; font-weight:700; color:var(--muted); background:var(--card);">Conflict</span>
+        <span style="border:1px solid var(--line); border-radius:999px; padding:3px 12px; font-size:12px; font-weight:700; color:var(--muted); background:var(--card);">Cross-document</span>
+      </div>
+      <div style="font-size:12px; color:var(--muted); text-align:center;">Kết quả benchmark của Advanced BigRAG trên testset ba pain point</div>
+    </div>
+  </div>
+  <!-- Ghi chú nội bộ (không hiển thị): 0.85 / 0.85 / 86% là số do user cung cấp cho deck,
+       chưa có benchmark artifact trong repo — xác nhận bằng MLflow run trước khi trình bày
+       như kết quả đo thật. -->
+</section>
+
+<!-- ============ Slide 10 — Demo 1 ============ -->
+<section class="slide">
+  <div class="kicker">Demo 1 / 3</div>
+  <h1>Văn bản thay đổi theo thời gian</h1>
+  <div class="content" style="flex-direction:row; gap:22px;">
+    <div style="flex:0 0 30%; display:flex; flex-direction:column; gap:14px;">
+      <div class="qcard">“Quy chế An toàn thông tin nào đang có hiệu lực và phần nào của văn bản cũ vẫn được áp dụng?”</div>
+      <div class="card" style="flex:1;">
+        <div style="font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Kỳ vọng cần chứng minh</div>
+        <ul class="check">
+          <li>Xác định <b>QĐ 342/2024</b> là phiên bản hiện hành.</li>
+          <li>Nhận biết QĐ 215/2022 đã bị <b>thay thế một phần</b>.</li>
+          <li>Không bỏ sót <b>Phụ lục 02</b> vẫn còn hiệu lực.</li>
+          <li>Hiển thị trích nguồn + quan hệ <code>THAY_THE</code> (partial).</li>
+        </ul>
+      </div>
+    </div>
+    <div class="placeholder" style="flex:1;">
+      PASTE DEMO SCREENSHOT HERE
+      <small>Ảnh chụp hệ thống thật: câu trả lời + citations + graph facts</small>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Slide 11 — Demo 2 ============ -->
+<section class="slide">
+  <div class="kicker">Demo 2 / 3</div>
+  <h1>Conflict khi sử dụng dữ liệu cho AI</h1>
+  <div class="content" style="flex-direction:row; gap:22px;">
+    <div style="flex:0 0 32%; display:flex; flex-direction:column; gap:12px;">
+      <div class="qcard">“DDB có được sử dụng dữ liệu khách hàng để huấn luyện mô hình AI không?”</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div class="node small" style="white-space:normal; flex:1;">QĐ 455/2025<br><span style="color:var(--raw);">Cần đồng ý riêng</span></div>
+        <span style="color:var(--warn); font-weight:800; font-size:18px;">↔</span>
+        <div class="node small" style="white-space:normal; flex:1;">QĐ 502/2025<br><span style="color:var(--graph);">Được dùng nếu đã ẩn danh</span></div>
+      </div>
+      <div class="card" style="flex:1;">
+        <div style="font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Kỳ vọng cần chứng minh</div>
+        <ul class="check" style="font-size:14px;">
+          <li><b>QĐ 455/2025</b>: dùng dữ liệu cá nhân để huấn luyện phải có <b>sự đồng ý riêng</b>.</li>
+          <li><b>QĐ 502/2025</b>: cho phép dữ liệu <b>đã ẩn danh</b>, lưu tối đa <b>24 tháng</b>, không nói rõ yêu cầu đồng ý.</li>
+          <li>Phát hiện <b>conflict / điểm chưa rõ</b>, không tự kết luận một văn bản thắng.</li>
+          <li>Kéo thêm <b>NĐ 88/2024</b> và <b>TT 04/2025</b>: dữ liệu ẩn danh còn là dữ liệu cá nhân không?</li>
+          <li>Trình bày cả hai hướng bằng chứng, <b>cảnh báo</b> và dẫn nguồn tương ứng.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="placeholder" style="flex:1;">
+      PASTE DEMO SCREENSHOT HERE
+      <small>Ưu tiên ảnh có answer, citation cards QĐ 455 &amp; QĐ 502, graph visualization nối sang NĐ 88 và TT 04</small>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Slide 12 — Demo 3 ============ -->
+<section class="slide">
+  <div class="kicker">Demo 3 / 3</div>
+  <h1>Quan hệ đa văn bản</h1>
+  <div class="content" style="flex-direction:row; gap:22px;">
+    <div style="flex:0 0 30%; display:flex; flex-direction:column; gap:14px;">
+      <div class="qcard">“Quy định An toàn thông tin của DDB dựa trên những văn bản pháp luật nào?”</div>
+      <div class="card" style="flex:1;">
+        <div style="font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Kỳ vọng cần chứng minh</div>
+        <ul class="check">
+          <li>Truy vết QĐ 342/2024 → <b>TT 09/2024/TT-NHNN</b>.</li>
+          <li>Mở rộng tiếp → <b>NĐ 88/2024/NĐ-CP</b>.</li>
+          <li>Phân biệt quan hệ graph (suy luận) với đoạn trích (trích dẫn).</li>
+          <li>Trình bày chuỗi căn cứ nhiều tầng + nguồn kiểm chứng.</li>
+        </ul>
+        <div style="margin-top:12px; font-size:13.5px; text-align:center; color:var(--muted);">
+          NĐ 88/2024 ⟶ TT 09/2024 ⟶ QĐ 342/2024
+        </div>
+      </div>
+    </div>
+    <div class="placeholder" style="flex:1;">
+      PASTE DEMO SCREENSHOT HERE
+      <small>Ưu tiên ảnh Knowledge Graph visualization + câu trả lời + citations</small>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Slide 13 — Thank You ============ -->
+<section class="slide dark" style="align-items:center; justify-content:center; text-align:center;">
+  <div style="font-size:60px; font-weight:900;">Big<span style="color:#38bdf8;">RAG</span></div>
+  <div style="font-size:21px; margin-top:18px; color:#cbd5e1; max-width:760px;">From document retrieval to connected, verifiable banking intelligence.</div>
+  <div style="font-size:30px; font-weight:700; margin-top:44px;">Thank you — Q&amp;A</div>
+</section>
+
+</div></div>
+
+<div class="hud">
+  <button id="prev">‹ Prev</button>
+  <button id="next">Next ›</button>
+  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+  <span id="counter"></span>
+  <span style="opacity:.6;">←/→ chuyển slide · F toàn màn hình</span>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const bar = document.getElementById('bar');
+  const counter = document.getElementById('counter');
+  let idx = 0;
+
+  function show(n) {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('active', k === idx));
+    counter.textContent = (idx + 1) + ' / ' + slides.length;
+    bar.style.width = ((idx + 1) / slides.length * 100) + '%';
+    history.replaceState(null, '', '#' + (idx + 1));
+  }
+
+  function fit() {
+    const scale = Math.min(window.innerWidth / 1280, (window.innerHeight - 40) / 720);
+    document.getElementById('stage').style.transform = 'scale(' + scale + ')';
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); show(idx + 1); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { e.preventDefault(); show(idx - 1); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key.toLowerCase() === 'f') {
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    }
+  });
+  document.getElementById('prev').onclick = () => show(idx - 1);
+  document.getElementById('next').onclick = () => show(idx + 1);
+  window.addEventListener('resize', fit);
+
+  fit();
+  show(parseInt(location.hash.slice(1), 10) - 1 || 0);
+</script>
+</body>
+</html>
