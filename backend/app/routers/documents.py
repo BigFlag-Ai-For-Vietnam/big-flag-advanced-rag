@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
@@ -17,6 +18,9 @@ from app.schemas.document import (
     DocumentListResponse,
     DocumentSummary,
     StatusResponse,
+    SupersedeRequest,
+    VersionChainItem,
+    VersionChainResponse,
 )
 from app.services import pipeline, qdrant_service, storage_service
 
@@ -44,10 +48,26 @@ def _chunk_count(db: Session, document_id: str) -> int:
     ) or 0
 
 
+def _lifecycle(doc: Document) -> str:
+    """Suy ra trạng thái vòng đời để hiển thị: active | superseded | expired."""
+    if doc.is_active:
+        return "active"
+    if doc.superseded_by_id:
+        return "superseded"
+    return "expired"
+
+
 def _to_summary(db: Session, doc: Document) -> DocumentSummary:
     summary = DocumentSummary.model_validate(doc)
     summary.chunk_count = _chunk_count(db, doc.id)
+    summary.lifecycle = _lifecycle(doc)
     return summary
+
+
+def _version_item(doc: Document) -> VersionChainItem:
+    item = VersionChainItem.model_validate(doc)
+    item.lifecycle = _lifecycle(doc)
+    return item
 
 
 @router.post("", response_model=DocumentSummary, status_code=201)
@@ -114,6 +134,7 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Không tìm thấy document.")
     detail = DocumentDetail.model_validate(doc)
     detail.chunk_count = len(doc.chunks)
+    detail.lifecycle = _lifecycle(doc)
     return detail
 
 
@@ -161,3 +182,103 @@ def delete_document(document_id: str, db: Session = Depends(get_db)):
     db.delete(doc)
     db.commit()
     return None
+
+
+# ----------------------------- versioning / hiệu lực -----------------------------
+
+@router.post("/{document_id}/supersede", response_model=list[DocumentSummary])
+def supersede_document(
+    document_id: str,
+    body: SupersedeRequest,
+    db: Session = Depends(get_db),
+):
+    """Đánh dấu văn bản `document_id` bị THAY THẾ bởi `new_document_id`.
+
+    Bản cũ: is_active=false, expiry_date=ngày hiệu lực bản mới, superseded_by_id=bản mới.
+    Bản mới: is_active=true, supersedes_id=bản cũ. Cập nhật cờ trên Qdrant (không re-embed).
+    """
+    old = db.get(Document, document_id)
+    if old is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy văn bản bị thay thế.")
+    new = db.get(Document, body.new_document_id)
+    if new is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy văn bản thay thế (new_document_id).")
+    if old.id == new.id:
+        raise HTTPException(status_code=400, detail="Văn bản không thể tự thay thế chính nó.")
+
+    effective = body.effective_date or datetime.now(timezone.utc)
+    old.is_active = False
+    old.expiry_date = effective
+    old.superseded_by_id = new.id
+    if body.note:
+        old.supersession_note = body.note
+    new.is_active = True
+    new.supersedes_id = old.id
+    if new.effective_date is None:
+        new.effective_date = effective
+    db.commit()
+
+    qdrant_service.set_active(old.id, False)
+    qdrant_service.set_active(new.id, True)
+    db.refresh(old)
+    db.refresh(new)
+    return [_to_summary(db, old), _to_summary(db, new)]
+
+
+@router.post("/{document_id}/expire", response_model=DocumentSummary)
+def expire_document(document_id: str, db: Session = Depends(get_db)):
+    """Đánh dấu văn bản hết hiệu lực (không có bản thay thế)."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy document.")
+    doc.is_active = False
+    doc.expiry_date = datetime.now(timezone.utc)
+    db.commit()
+    qdrant_service.set_active(doc.id, False)
+    db.refresh(doc)
+    return _to_summary(db, doc)
+
+
+@router.post("/{document_id}/reactivate", response_model=DocumentSummary)
+def reactivate_document(document_id: str, db: Session = Depends(get_db)):
+    """Kích hoạt lại văn bản (reset demo): is_active=true, xoá expiry + liên kết bị thay thế."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy document.")
+    doc.is_active = True
+    doc.expiry_date = None
+    doc.superseded_by_id = None
+    db.commit()
+    qdrant_service.set_active(doc.id, True)
+    db.refresh(doc)
+    return _to_summary(db, doc)
+
+
+@router.get("/{document_id}/versions", response_model=VersionChainResponse)
+def get_version_chain(document_id: str, db: Session = Depends(get_db)):
+    """Trả toàn bộ chuỗi phiên bản liên quan (đi theo cả supersedes_id lẫn superseded_by_id),
+    sắp theo effective_date tăng dần (cũ -> mới) — cho UI timeline."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy document.")
+    collected: dict[str, Document] = {}
+    stack = [document_id]
+    while stack:
+        did = stack.pop()
+        if did in collected:
+            continue
+        d = db.get(Document, did)
+        if d is None:
+            continue
+        collected[did] = d
+        for nid in (d.supersedes_id, d.superseded_by_id):
+            if nid and nid not in collected:
+                stack.append(nid)
+
+    def _sort_key(d: Document) -> datetime:
+        dt = d.effective_date or d.created_at
+        # chuẩn hoá về aware-UTC: SQLite trả naive, còn giá trị vừa set qua API là aware
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    docs = sorted(collected.values(), key=_sort_key)
+    return VersionChainResponse(items=[_version_item(d) for d in docs])

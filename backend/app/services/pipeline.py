@@ -132,6 +132,8 @@ def run_pipeline(document_id: str) -> None:
                     "chunk_index": row.chunk_index,
                     "title": document.title,
                     "final_content": row.final_content,
+                    # cờ hiệu lực để retrieval loại văn bản đã bị thay thế (reindex giữ đúng trạng thái)
+                    "is_active": document.is_active,
                 },
             }
             for row, vec in zip(chunk_rows, vectors)

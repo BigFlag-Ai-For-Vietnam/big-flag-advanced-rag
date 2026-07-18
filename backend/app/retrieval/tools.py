@@ -9,6 +9,7 @@ import logging
 
 from langchain_core.tools import tool
 
+from app.config import settings
 from app.services import embedding_service, qdrant_service
 
 logger = logging.getLogger("retrieval.tools")
@@ -24,7 +25,7 @@ def query_vector_store(query: str, top_k: int = 5) -> list[dict]:
     """
     logger.info("[query_vector_store] input query=%r top_k=%s", query, top_k)
     query_vector = embedding_service.embed_query(query)
-    hits = qdrant_service.search(query_vector, top_k)
+    hits = qdrant_service.search(query_vector, top_k, active_only=settings.retrieval_exclude_inactive)
     results = [
         {
             "chunk_id": h["payload"].get("chunk_id", ""),
@@ -62,7 +63,9 @@ def query_catalog(query: str, top_k: int = 5) -> list[dict]:
     from app.models import Document
     from app.services.catalog_service import format_catalog_text
 
-    hits = qdrant_service.search(embedding_service.embed_query(query), top_k)
+    hits = qdrant_service.search(
+        embedding_service.embed_query(query), top_k, active_only=settings.retrieval_exclude_inactive
+    )
     doc_ids: list[str] = []
     for h in hits:
         did = h["payload"].get("document_id")
@@ -74,6 +77,9 @@ def query_catalog(query: str, top_k: int = 5) -> list[dict]:
     try:
         for did in doc_ids:
             doc = db.get(Document, did)
+            # bỏ qua văn bản đã hết hiệu lực khi loại-bỏ đang bật
+            if settings.retrieval_exclude_inactive and doc and not doc.is_active:
+                continue
             if doc and doc.catalog and doc.catalog.get("tree"):
                 results.append(
                     {

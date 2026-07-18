@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     retrieval_enable_hybrid: bool = True
     # Trọng số dense khi fuse (0..1); phần còn lại (1-alpha) cho BM25.
     retrieval_hybrid_alpha: float = 0.5
+
+    # --- Versioning / hiệu lực ---
+    # Bật: loại HẲN văn bản đã hết hiệu lực/bị thay thế (is_active=false) khỏi retrieval
+    # (cả 2 kênh dense + BM25 + catalog) → câu trả lời luôn dùng bản hiện hành.
+    # Tắt (false): tìm cả văn bản đã hết hiệu lực (để demo so sánh RAG có/không versioning).
+    retrieval_exclude_inactive: bool = True
+
     # --- Eval / MLflow ---
     # Mặc định localhost phục vụ CLI chạy trên host; backend chạy trong container
     # PHẢI override (http://host.docker.internal:5000 hoặc mạng compose chung) — xem FR-13.

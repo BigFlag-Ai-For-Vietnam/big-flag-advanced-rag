@@ -7,6 +7,8 @@ export const api = axios.create({ baseURL: BASE_URL });
 export type DocStatus =
   | "uploaded" | "parsing" | "parsed" | "chunking" | "indexing" | "indexed" | "failed";
 
+export type Lifecycle = "active" | "superseded" | "expired";
+
 export interface DocumentSummary {
   id: string;
   title: string;
@@ -16,6 +18,16 @@ export interface DocumentSummary {
   page_count: number | null;
   chunk_count: number;
   error_message: string | null;
+  // --- versioning / hiệu lực ---
+  doc_no: string | null;
+  version_label: string | null;
+  effective_date: string | null;
+  expiry_date: string | null;
+  is_active: boolean;
+  supersedes_id: string | null;
+  superseded_by_id: string | null;
+  supersession_note: string | null;
+  lifecycle: Lifecycle;
   created_at: string;
   updated_at: string;
 }
@@ -101,6 +113,48 @@ export async function deleteDocument(id: string): Promise<void> {
 
 export async function reprocessDocument(id: string): Promise<void> {
   await api.post(`/api/documents/${id}/reprocess`);
+}
+
+// --- versioning / hiệu lực ---
+export interface VersionChainItem {
+  id: string;
+  title: string;
+  doc_no: string | null;
+  version_label: string | null;
+  effective_date: string | null;
+  expiry_date: string | null;
+  is_active: boolean;
+  lifecycle: Lifecycle;
+}
+
+export async function supersedeDocument(
+  oldId: string,
+  newDocumentId: string,
+  options: { note?: string; effectiveDate?: string } = {},
+): Promise<DocumentSummary[]> {
+  const { data } = await api.post(`/api/documents/${oldId}/supersede`, {
+    new_document_id: newDocumentId,
+    note: options.note || null,
+    effective_date: options.effectiveDate
+      ? `${options.effectiveDate}T00:00:00`
+      : null,
+  });
+  return data;
+}
+
+export async function expireDocument(id: string): Promise<DocumentSummary> {
+  const { data } = await api.post(`/api/documents/${id}/expire`);
+  return data;
+}
+
+export async function reactivateDocument(id: string): Promise<DocumentSummary> {
+  const { data } = await api.post(`/api/documents/${id}/reactivate`);
+  return data;
+}
+
+export async function getVersionChain(id: string): Promise<VersionChainItem[]> {
+  const { data } = await api.get(`/api/documents/${id}/versions`);
+  return data.items;
 }
 
 export async function mcpRetrieve(question: string, top_k: number): Promise<McpRetrieveResponse> {

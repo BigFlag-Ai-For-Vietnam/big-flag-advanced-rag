@@ -3,7 +3,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Enum, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -51,6 +51,18 @@ class Document(Base):
     # catalog: {"tree": [{"name": "...", "children": [{"name": "...", "children": []}, ...]}, ...]}
     # — cây phân cấp, chỉ tên mục, không kèm giá trị
     catalog: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # --- Versioning / hiệu lực (theo dõi văn bản hết hiệu lực, thay thế) ---
+    # số hiệu văn bản (vd "342/2024/QĐ-DDB") — business key gom nhóm các phiên bản cùng một văn bản
+    doc_no: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    version_label: Mapped[str | None] = mapped_column(String(32), nullable=True)  # vd "v2.0"
+    effective_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # còn hiệu lực hay không — khóa retrieval theo cột này (hết hiệu lực bị loại khỏi tìm kiếm)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    # soft-FK (String, KHÔNG ràng buộc — hợp migration nhẹ + self-FK SQLite ALTER không hỗ trợ)
+    supersedes_id: Mapped[str | None] = mapped_column(String(36), nullable=True)      # bản này thay thế ai
+    superseded_by_id: Mapped[str | None] = mapped_column(String(36), nullable=True)   # ai thay thế bản này
+    supersession_note: Mapped[str | None] = mapped_column(Text, nullable=True)        # vd "giữ hiệu lực Phụ lục 02"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

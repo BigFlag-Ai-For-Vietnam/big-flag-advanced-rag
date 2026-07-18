@@ -64,7 +64,9 @@ async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[Sub
 
 
 def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
-    hits = qdrant_service.search(embedding_service.embed_query(question), top_k)
+    hits = qdrant_service.search(
+        embedding_service.embed_query(question), top_k, active_only=settings.retrieval_exclude_inactive
+    )
     return [
         Citation(
             document_id=h["payload"].get("document_id", ""),
@@ -86,6 +88,8 @@ def _fetch_catalogs(db: Session, citations: list[Citation]) -> list[CatalogInfo]
     out: list[CatalogInfo] = []
     for did in doc_ids:
         doc = db.get(Document, did)
+        if settings.retrieval_exclude_inactive and doc and not doc.is_active:
+            continue
         if doc and doc.catalog and doc.catalog.get("tree"):
             out.append(CatalogInfo(document_id=doc.id, title=doc.title, catalog=doc.catalog))
     return out

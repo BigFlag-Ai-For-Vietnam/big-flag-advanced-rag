@@ -5,12 +5,33 @@
 User chọn category lúc upload để prefill, và được phép customize (thêm/bớt) danh sách này.
 
 Danh sách dưới đây rút ra từ chính các tài liệu mẫu trong `backend/docs`
-(Thẻ tín dụng Sung Túc / SHBFinance, Bảo hiểm Family, Bảo hiểm Bảo Tâm An + TASCO).
+(Thẻ tín dụng Sung Túc / SHBFinance, Bảo hiểm Family, Bảo hiểm Bảo Tâm An + TASCO)
+và bộ văn bản tuân thủ mô phỏng trong `sample_compliance_corpus/`.
 """
 from __future__ import annotations
 
 # key ổn định (dùng trong API/DB) -> {label hiển thị, entities preset}
 CATALOG_PRESETS: dict[str, dict] = {
+    "van_ban_tuan_thu": {
+        "label": "Văn bản tuân thủ / Quy định",
+        "entities": [
+            "Thông tin văn bản, phạm vi & đối tượng áp dụng",
+            "Căn cứ pháp lý & văn bản tham chiếu",
+            "Hiệu lực, sửa đổi & thay thế",
+            "Mật khẩu & xác thực đa yếu tố (MFA)",
+            "Nhật ký, giám sát & ứng phó sự cố",
+            "Khóa phiên, truy cập & làm việc từ xa",
+            "Hệ thống thông tin & phân loại cấp độ",
+            "Dữ liệu cá nhân, sự đồng ý & quyền chủ thể",
+            "AI, dữ liệu huấn luyện & quyết định tự động",
+            "Mã hóa, ẩn danh & bảo mật dữ liệu",
+            "KYC & phòng chống rửa tiền",
+            "Ngưỡng giao dịch & dấu hiệu đáng ngờ",
+            "Thời hạn lưu trữ",
+            "Ngoại lệ, quy tắc ưu tiên & xung đột",
+            "Chế tài & xử phạt",
+        ],
+    },
     "the_tin_dung": {
         "label": "Thẻ tín dụng",
         "entities": [

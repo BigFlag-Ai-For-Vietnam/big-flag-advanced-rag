@@ -15,6 +15,7 @@ import re
 
 from rank_bm25 import BM25Okapi
 
+from app.config import settings
 from app.db import SessionLocal
 from app.models import Chunk, Document
 
@@ -32,11 +33,11 @@ def _tok(text: str) -> list[str]:
 def _build_corpus() -> tuple[list[dict], BM25Okapi | None]:
     db = SessionLocal()
     try:
-        rows = (
-            db.query(Chunk, Document.title)
-            .join(Document, Chunk.document_id == Document.id)
-            .all()
-        )
+        q = db.query(Chunk, Document.title).join(Document, Chunk.document_id == Document.id)
+        if settings.retrieval_exclude_inactive:
+            # loại chunk của văn bản đã hết hiệu lực/bị thay thế khỏi corpus BM25
+            q = q.filter(Document.is_active.is_(True))
+        rows = q.all()
     finally:
         db.close()
     chunks = [
@@ -54,8 +55,17 @@ def _build_corpus() -> tuple[list[dict], BM25Okapi | None]:
 
 
 def _chunk_count() -> int:
+    """Đếm chunk làm cache key. Khi loại-bỏ đang bật, chỉ đếm chunk của văn bản còn hiệu lực
+    để corpus rebuild ngay khi một văn bản bị thay thế (nếu đếm tất cả, count không đổi → cache cũ)."""
     db = SessionLocal()
     try:
+        if settings.retrieval_exclude_inactive:
+            return (
+                db.query(Chunk)
+                .join(Document, Chunk.document_id == Document.id)
+                .filter(Document.is_active.is_(True))
+                .count()
+            )
         return db.query(Chunk).count()
     finally:
         db.close()

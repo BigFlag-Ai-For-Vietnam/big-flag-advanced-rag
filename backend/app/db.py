@@ -67,6 +67,15 @@ def _auto_migrate_sqlite() -> None:
         "category": "VARCHAR(64)",
         "focus_entities": "JSON",
         "catalog": "JSON",
+        # --- versioning / hiệu lực ---
+        "doc_no": "VARCHAR(64)",
+        "version_label": "VARCHAR(32)",
+        "effective_date": "DATETIME",
+        "expiry_date": "DATETIME",
+        "is_active": "BOOLEAN DEFAULT 1",  # row cũ mặc định còn hiệu lực
+        "supersedes_id": "VARCHAR(36)",
+        "superseded_by_id": "VARCHAR(36)",
+        "supersession_note": "TEXT",
     }
     with engine.begin() as conn:
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(documents)")}

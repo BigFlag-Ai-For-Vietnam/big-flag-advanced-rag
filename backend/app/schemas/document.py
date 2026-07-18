@@ -37,6 +37,17 @@ class DocumentSummary(BaseModel):
     page_count: int | None = None
     chunk_count: int = 0
     error_message: str | None = None
+    # --- versioning / hiệu lực ---
+    doc_no: str | None = None
+    version_label: str | None = None
+    effective_date: datetime | None = None
+    expiry_date: datetime | None = None
+    is_active: bool = True
+    supersedes_id: str | None = None
+    superseded_by_id: str | None = None
+    supersession_note: str | None = None
+    # trạng thái vòng đời suy ra: active | superseded | expired (đặt trong _to_summary)
+    lifecycle: str = "active"
     created_at: datetime
     updated_at: datetime
 
@@ -46,6 +57,30 @@ class DocumentDetail(DocumentSummary):
     catalog: dict | None = None
     pages: list[PageOut] = []
     chunks: list[ChunkOut] = []
+
+
+class SupersedeRequest(BaseModel):
+    """Đánh dấu văn bản hiện tại (id trên path) bị thay thế bởi new_document_id."""
+    new_document_id: str
+    note: str | None = None          # ghi chú thay thế (vd giữ Phụ lục 02)
+    effective_date: datetime | None = None  # ngày hiệu lực bản mới (mặc định: now)
+
+
+class VersionChainItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    doc_no: str | None = None
+    version_label: str | None = None
+    effective_date: datetime | None = None
+    expiry_date: datetime | None = None
+    is_active: bool = True
+    lifecycle: str = "active"
+
+
+class VersionChainResponse(BaseModel):
+    items: list[VersionChainItem]   # sắp theo effective_date tăng dần (cũ -> mới)
 
 
 class CatalogPreset(BaseModel):

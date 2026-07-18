@@ -8,7 +8,7 @@ def test_query_vector_store_returns_expected_shape(monkeypatch):
     monkeypatch.setattr(
         qdrant_service,
         "search",
-        lambda vector, top_k: [
+        lambda vector, top_k, active_only=True: [
             {
                 "id": "p1",
                 "score": 0.9,
@@ -39,7 +39,7 @@ def test_query_vector_store_returns_expected_shape(monkeypatch):
 
 def test_query_vector_store_empty_hits(monkeypatch):
     monkeypatch.setattr(embedding_service, "embed_query", lambda text: [0.0])
-    monkeypatch.setattr(qdrant_service, "search", lambda vector, top_k: [])
+    monkeypatch.setattr(qdrant_service, "search", lambda vector, top_k, active_only=True: [])
 
     assert query_vector_store.invoke({"query": "câu hỏi bất kỳ"}) == []
 

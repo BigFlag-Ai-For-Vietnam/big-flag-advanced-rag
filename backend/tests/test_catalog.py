@@ -1,4 +1,6 @@
 """Test offline cho catalog (cây entities): parse JSON, merge, prune, format text, preset."""
+from types import SimpleNamespace
+
 from app.catalog_presets import (
     CATALOG_PRESETS,
     list_presets,
@@ -12,6 +14,7 @@ from app.services.catalog_service import (
     _prune,
     format_catalog_text,
 )
+from scripts import recatalog
 
 
 def _names(nodes):
@@ -117,6 +120,41 @@ def test_resolve_preset_by_category():
     assert out == CATALOG_PRESETS["bao_hiem"]["entities"]
 
 
+def test_compliance_preset_covers_ground_truth_entities():
+    entities = CATALOG_PRESETS["van_ban_tuan_thu"]["entities"]
+    joined = "\n".join(entities)
+
+    # Các nhóm này bao phủ entity dùng chung và ba pain point P1/P2/P3 trong GROUND_TRUTH.md.
+    for expected in [
+        "Căn cứ pháp lý",
+        "Hiệu lực, sửa đổi & thay thế",
+        "Mật khẩu",
+        "xác thực đa yếu tố",
+        "Khóa phiên",
+        "Dữ liệu cá nhân",
+        "dữ liệu huấn luyện",
+        "KYC",
+        "Thời hạn lưu trữ",
+        "xung đột",
+    ]:
+        assert expected in joined
+
+
+def test_compliance_catalog_prompt_preserves_traceable_names_without_values():
+    messages = _build_chunk_messages(
+        "Quyết định 342/2024/QĐ-DDB",
+        CATALOG_PRESETS["van_ban_tuan_thu"]["entities"],
+        "Điều 2. Mật khẩu phải có tối thiểu 12 ký tự.",
+    )
+    rules = messages[-1]["content"]
+
+    assert "KHÁI NIỆM NGHIỆP VỤ" in rules
+    assert "số Điều/Khoản/Phụ lục" in rules
+    assert "TÊN và SỐ HIỆU văn bản" in rules
+    assert "KHÔNG kèm giá trị cụ thể" in rules
+    assert "Không suy diễn" in rules
+
+
 def test_resolve_default_when_unknown_category():
     out = resolve_focus_entities("khong_ton_tai", None)
     assert out == CATALOG_PRESETS["khac"]["entities"]
@@ -125,6 +163,34 @@ def test_resolve_default_when_unknown_category():
 def test_list_presets_shape():
     presets = list_presets()
     keys = {p["key"] for p in presets}
-    assert {"the_tin_dung", "bao_hiem", "quy_trinh", "khac"} <= keys
+    assert {"van_ban_tuan_thu", "the_tin_dung", "bao_hiem", "quy_trinh", "khac"} <= keys
     for p in presets:
         assert p["label"] and isinstance(p["entities"], list)
+
+
+def test_recatalog_uses_contextual_chunks_by_default(monkeypatch):
+    doc = SimpleNamespace(
+        pages=[SimpleNamespace(parsed_text="Nội dung trang")],
+        chunks=[SimpleNamespace(final_content="Chunk đã contextual")],
+    )
+    monkeypatch.setattr(recatalog.settings, "catalog_source", "chunks")
+
+    units, unit_kind, full_text = recatalog._catalog_input(doc)
+
+    assert units == ["Chunk đã contextual"]
+    assert unit_kind == "chunk"
+    assert full_text == "Nội dung trang"
+
+
+def test_recatalog_can_use_pages(monkeypatch):
+    doc = SimpleNamespace(
+        pages=[SimpleNamespace(parsed_text="Trang 1"), SimpleNamespace(parsed_text=None)],
+        chunks=[SimpleNamespace(final_content="Chunk")],
+    )
+    monkeypatch.setattr(recatalog.settings, "catalog_source", "pages")
+
+    units, unit_kind, full_text = recatalog._catalog_input(doc)
+
+    assert units == ["Trang 1", ""]
+    assert unit_kind == "page"
+    assert full_text == "Trang 1"
