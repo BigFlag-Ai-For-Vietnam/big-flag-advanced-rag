@@ -19,6 +19,17 @@ class DocumentStatus(str, enum.Enum):
     failed = "failed"
 
 
+class GraphStatus(str, enum.Enum):
+    """Trạng thái build knowledge graph (Neo4j) — tách biệt khỏi DocumentStatus vì graph-build
+    chạy nền song song với Qdrant indexing: DocumentStatus.indexed phải là tín hiệu DUY NHẤT
+    "chunk-RAG dùng được", không phụ thuộc graph đã xong hay chưa."""
+
+    not_built = "not_built"
+    building = "building"
+    ready = "ready"
+    failed = "failed"
+
+
 def _uuid() -> str:
     return str(uuid.uuid4())
 
@@ -51,6 +62,9 @@ class Document(Base):
     # catalog: {"tree": [{"name": "...", "children": [{"name": "...", "children": []}, ...]}, ...]}
     # — cây phân cấp, chỉ tên mục, không kèm giá trị
     catalog: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # --- Knowledge Graph build (Neo4j via LightRAG) — độc lập với `status` ở trên ---
+    graph_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    graph_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

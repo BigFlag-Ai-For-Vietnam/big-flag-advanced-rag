@@ -86,6 +86,26 @@ class Settings(BaseSettings):
     retrieval_enable_hybrid: bool = True
     # Trọng số dense khi fuse (0..1); phần còn lại (1-alpha) cho BM25.
     retrieval_hybrid_alpha: float = 0.5
+
+    # --- Knowledge Graph (Neo4j) — đọc lúc query ---
+    neo4j_uri: str = "bolt://neo4j:7687"
+    neo4j_username: str = "neo4j"
+    neo4j_password: str = ""
+    # Bật graph baseline trong retrieval engine — mặc định tắt, chỉ bật sau khi graph đã
+    # build (graph_service.stats() không rỗng), tránh giai đoạn "bật nhưng graph rỗng".
+    retrieval_enable_graph: bool = False
+    retrieval_graph_citation_hops: int = 1
+    retrieval_graph_concept_top_k: int = 5
+    retrieval_graph_max_facts_per_subgoal: int = 6
+    # Model embedding tiếng Việt cho similarity thấp hơn trực giác (calibrate thật ở PoC:
+    # 1 cặp chắc chắn đúng chỉ đạt ~0.62) — KHÔNG dùng threshold mặc định kiểu 0.8.
+    retrieval_graph_concept_embedding_threshold: float = 0.65
+
+    # --- Knowledge Graph build (LightRAG + ontology) — chạy lúc ingest, nền, không chặn Qdrant ---
+    kg_enable_build: bool = False
+    kg_categories: list[str] = ["tuan_thu"]     # ontology hiện chỉ verify đúng domain này
+    kg_max_concurrent_builds: int = 2           # bounded — LightRAG tốn nhiều LLM call
+
     # --- Eval / MLflow ---
     # Mặc định localhost phục vụ CLI chạy trên host; backend chạy trong container
     # PHẢI override (http://host.docker.internal:5000 hoặc mạng compose chung) — xem FR-13.

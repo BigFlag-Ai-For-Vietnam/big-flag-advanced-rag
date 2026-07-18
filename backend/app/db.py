@@ -67,6 +67,8 @@ def _auto_migrate_sqlite() -> None:
         "category": "VARCHAR(64)",
         "focus_entities": "JSON",
         "catalog": "JSON",
+        "graph_status": "VARCHAR(20)",
+        "graph_error_message": "TEXT",
     }
     with engine.begin() as conn:
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(documents)")}

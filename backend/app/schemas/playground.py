@@ -25,10 +25,29 @@ class CatalogInfo(BaseModel):
     catalog: dict
 
 
+class GraphFact(BaseModel):
+    """1 quan hệ/thực thể lấy từ knowledge graph (Neo4j) — KHÔNG phải trích dẫn nguyên văn
+    như Citation, mà là bằng chứng suy luận (quan hệ văn bản-văn bản, hoặc bundle giá trị
+    theo khái niệm) để LLM tự reasoning xung đột/thay thế xuyên văn bản."""
+
+    fact_id: str
+    source_entity: str
+    source_type: str
+    relation: str
+    target_entity: str
+    target_type: str
+    properties: dict = {}
+    source_document_title: str = ""
+    description: str = ""
+    strategy: str = ""
+    score: float = 0.0
+
+
 class QueryResponse(BaseModel):
     answer: str
     citations: list[Citation]
     catalogs: list[CatalogInfo] = []
+    graph_facts: list[GraphFact] = []
 
 
 # --- Retrieval Engine (LangGraph + MCP) ---
@@ -54,12 +73,14 @@ class SubgoalCoverage(BaseModel):
     satisfied: bool
     note: str = ""
     evidence_count: int = 0
+    graph_evidence_count: int = 0
 
 
 class RetrieveResult(BaseModel):
-    """Kết quả gọi tool `retrieve` của Retrieval Engine — citations + trace + coverage."""
+    """Kết quả gọi tool `retrieve` của Retrieval Engine — citations + graph_facts + trace + coverage."""
 
     citations: list[Citation]
+    graph_facts: list[GraphFact] = []
     normalized_question: str
     rewritten_question: str
     tool_calls: list[ToolCallTrace]
