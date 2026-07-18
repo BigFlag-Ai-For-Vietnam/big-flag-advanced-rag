@@ -47,6 +47,48 @@ def query_vector_store(query: str, top_k: int = 5) -> list[dict]:
 
 
 @tool
+def query_catalog(query: str, top_k: int = 5) -> list[dict]:
+    """Xem CATALOG (mục lục theo facet — chỉ TÊN mục, KHÔNG có giá trị cụ thể) của các tài
+    liệu liên quan tới `query`.
+
+    Dùng để biết tổng thể tài liệu có những mục nào / bao nhiêu mục — đặc biệt cho câu hỏi
+    liệt kê hoặc tổng hợp (vd "có những loại phí nào"): đối chiếu catalog để biết cần lấy đủ
+    bao nhiêu mục, rồi dùng query_vector_store lấy dữ liệu cụ thể từng mục. Catalog KHÔNG
+    chứa số liệu — muốn giá trị phải gọi query_vector_store.
+    """
+    logger.info("[query_catalog] input query=%r top_k=%s", query, top_k)
+    # import trong hàm: chỉ khi tool được gọi mới đụng tới DB (MCP service mount SQLite riêng)
+    from app.db import SessionLocal
+    from app.models import Document
+    from app.services.catalog_service import format_catalog_text
+
+    hits = qdrant_service.search(embedding_service.embed_query(query), top_k)
+    doc_ids: list[str] = []
+    for h in hits:
+        did = h["payload"].get("document_id")
+        if did and did not in doc_ids:
+            doc_ids.append(did)
+
+    results: list[dict] = []
+    db = SessionLocal()
+    try:
+        for did in doc_ids:
+            doc = db.get(Document, did)
+            if doc and doc.catalog and doc.catalog.get("tree"):
+                results.append(
+                    {
+                        "document_id": doc.id,
+                        "title": doc.title,
+                        "outline": format_catalog_text(doc.title, doc.catalog),
+                    }
+                )
+    finally:
+        db.close()
+    logger.info("[query_catalog] output docs=%s", [r["document_id"] for r in results])
+    return results
+
+
+@tool
 def query_graph_knowledge(query: str) -> list[dict]:
     """Tra cứu tri thức dạng quan hệ/thực thể (graph) giữa các sản phẩm/điều khoản/dịch vụ.
 

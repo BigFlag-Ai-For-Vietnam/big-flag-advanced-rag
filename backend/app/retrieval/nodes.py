@@ -101,7 +101,11 @@ def rerank(messages: list, top_k: int) -> list[Citation]:
     candidates: list[dict] = []
     for msg in messages:
         if isinstance(msg, ToolMessage):
-            candidates.extend(_parse_tool_message(msg))
+            for item in _parse_tool_message(msg):
+                # chỉ hit dạng chunk (có chunk_id) mới thành citation; kết quả query_catalog
+                # (mục lục, không có chunk_id/final_content) chỉ để agent tham khảo, không trích.
+                if isinstance(item, dict) and item.get("chunk_id"):
+                    candidates.append(item)
 
     deduped: dict[str, dict] = {}
     for c in candidates:

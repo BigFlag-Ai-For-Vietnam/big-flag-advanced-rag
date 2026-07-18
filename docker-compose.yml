@@ -5,7 +5,11 @@ services:
       - "6333:6333"
       - "6334:6334"
     volumes:
+      # Runtime storage = named volume (nhanh, tránh rủi ro mmap khi bind mount trên Windows).
+      # Data đi theo git bằng SNAPSHOT (thư mục qdrant_snapshots/) — xem scripts/qdrant_*.
       - qdrant_data:/qdrant/storage
+      # mount thư mục snapshot của repo vào container để tạo/khôi phục snapshot qua API
+      - ./qdrant_snapshots:/qdrant/snapshots
 
   backend:
     build: ./backend
@@ -37,6 +41,12 @@ services:
     environment:
       # override cho môi trường container (qdrant reachable qua service name)
       QDRANT_URL: http://qdrant:6333
+      # tool query_catalog đọc catalog document-level từ SQLite (read-only). Mount cùng
+      # file DB với backend (backend ghi, mcp chỉ đọc) — xem volume ./backend/data bên dưới.
+      DB_URL: sqlite:////data/rag.db
+      DATA_DIR: /data
+    volumes:
+      - ./backend/data:/data
     depends_on:
       - qdrant
 

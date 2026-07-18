@@ -12,6 +12,7 @@ export interface DocumentSummary {
   title: string;
   original_filename: string;
   status: DocStatus;
+  category: string | null;
   page_count: number | null;
   chunk_count: number;
   error_message: string | null;
@@ -25,7 +26,15 @@ export interface ChunkOut {
   contextual_prefix: string | null; final_content: string;
   qdrant_point_id: string | null; token_count: number | null;
 }
+
+export interface CatalogNode { name: string; children: CatalogNode[]; }
+export interface Catalog { tree: CatalogNode[]; }
+export interface CatalogInfo { document_id: string; title: string; catalog: Catalog; }
+export interface CatalogPreset { key: string; label: string; entities: string[]; }
+
 export interface DocumentDetail extends DocumentSummary {
+  focus_entities: string[] | null;
+  catalog: Catalog | null;
   pages: PageOut[];
   chunks: ChunkOut[];
 }
@@ -47,10 +56,23 @@ export interface McpRetrieveResponse {
   config: McpRetrieveConfig;
 }
 
-export async function uploadDocument(file: File): Promise<DocumentSummary> {
+export interface UploadOptions {
+  category?: string | null;
+  focusEntities?: string[];
+}
+
+export async function uploadDocument(file: File, opts: UploadOptions = {}): Promise<DocumentSummary> {
   const form = new FormData();
   form.append("file", file);
+  if (opts.category) form.append("category", opts.category);
+  if (opts.focusEntities && opts.focusEntities.length)
+    form.append("focus_entities", JSON.stringify(opts.focusEntities));
   const { data } = await api.post("/api/documents", form);
+  return data;
+}
+
+export async function getCatalogPresets(): Promise<CatalogPreset[]> {
+  const { data } = await api.get("/api/catalog-presets");
   return data;
 }
 

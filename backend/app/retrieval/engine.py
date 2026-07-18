@@ -22,7 +22,7 @@ from langgraph.prebuilt import create_react_agent
 from app.config import settings
 from app.retrieval import nodes
 from app.retrieval.llm_chat_model import ChatFPT
-from app.retrieval.tools import query_graph_knowledge, query_vector_store
+from app.retrieval.tools import query_catalog, query_graph_knowledge, query_vector_store
 from app.schemas.playground import Citation
 
 logger = logging.getLogger("retrieval.engine")
@@ -32,6 +32,9 @@ REACT_SYSTEM_PROMPT = (
     "lợi, phí, sản phẩm/dịch vụ). Nhiệm vụ DUY NHẤT của bạn là tìm thông tin liên quan "
     "bằng các tool được cung cấp — KHÔNG tự trả lời câu hỏi bằng kiến thức riêng.\n"
     "- Luôn gọi query_vector_store trước để tìm đoạn văn bản liên quan.\n"
+    "- Với câu hỏi LIỆT KÊ/TỔNG HỢP (vd 'có những loại phí nào', 'gồm những quyền lợi gì'), "
+    "gọi query_catalog để xem mục lục đầy đủ của tài liệu, rồi dùng query_vector_store lấy "
+    "dữ liệu cụ thể cho tới khi đủ các mục trong catalog.\n"
     "- Nếu câu hỏi có vẻ cần quan hệ giữa nhiều sản phẩm/điều khoản, thử thêm "
     "query_graph_knowledge.\n"
     "- Nếu kết quả lần đầu chưa đủ liên quan, thử gọi lại tool với câu truy vấn khác "
@@ -54,7 +57,7 @@ def _build_react_agent(model=None):
     """Tách riêng để test có thể tiêm model giả (fake BaseChatModel)."""
     return create_react_agent(
         model=model or ChatFPT(),
-        tools=[query_vector_store, query_graph_knowledge],
+        tools=[query_vector_store, query_catalog, query_graph_knowledge],
         prompt=REACT_SYSTEM_PROMPT,
     )
 

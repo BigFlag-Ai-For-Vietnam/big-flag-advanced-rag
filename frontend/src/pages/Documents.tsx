@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import StatusBadge from "../components/StatusBadge";
 import Drawer from "../components/Drawer";
+import CatalogTree from "../components/CatalogTree";
 import { useToast } from "../lib/toast";
 import { cn } from "../lib/cn";
 
@@ -17,7 +18,7 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<DocumentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<DocumentDetail | null>(null);
-  const [tab, setTab] = useState<"pages" | "chunks">("chunks");
+  const [tab, setTab] = useState<"pages" | "chunks" | "catalog">("chunks");
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -170,6 +171,9 @@ export default function DocumentsPage() {
               <TabBtn active={tab === "pages"} onClick={() => setTab("pages")}>
                 Trang ({detail.pages.length})
               </TabBtn>
+              <TabBtn active={tab === "catalog"} onClick={() => setTab("catalog")}>
+                Catalog ({detail.catalog?.tree.length ?? 0})
+              </TabBtn>
             </div>
 
             {tab === "pages" ? (
@@ -187,6 +191,23 @@ export default function DocumentsPage() {
                     </pre>
                   </details>
                 ))}
+              </div>
+            ) : tab === "catalog" ? (
+              <div className="space-y-3">
+                {detail.focus_entities && detail.focus_entities.length > 0 && (
+                  <p className="text-xs text-faint">
+                    Facet đã chỉ định: {detail.focus_entities.join(" · ")}
+                  </p>
+                )}
+                {detail.catalog && detail.catalog.tree.length > 0 ? (
+                  <div className="rounded-lg border bg-surface p-4">
+                    <CatalogTree nodes={detail.catalog.tree} />
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted">
+                    Chưa có catalog (chỉ sinh sau khi tài liệu được xử lý xong).
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-3">

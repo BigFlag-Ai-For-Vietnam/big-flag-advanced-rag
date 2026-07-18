@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface Props {
@@ -25,7 +26,10 @@ export default function Drawer({ open, onClose, title, subtitle, children }: Pro
 
   if (!open) return null;
 
-  return (
+  // Portal ra body: tránh bị "nhốt" bởi ancestor có transform (vd .animate-fade-in dùng
+  // animation-fill-mode: both giữ lại transform: translateY(0) -> tạo containing block
+  // khiến position:fixed bám vào cột nội dung thay vì viewport).
+  return createPortal(
     <div className="fixed inset-0 z-50">
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-fade-in"
@@ -47,6 +51,7 @@ export default function Drawer({ open, onClose, title, subtitle, children }: Pro
         </header>
         <div className="scrollbar-thin flex-1 overflow-y-auto px-6 py-5">{children}</div>
       </aside>
-    </div>
+    </div>,
+    document.body
   );
 }
