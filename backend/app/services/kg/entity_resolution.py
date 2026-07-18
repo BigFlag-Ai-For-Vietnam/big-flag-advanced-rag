@@ -13,6 +13,7 @@ connection ở đây.
 """
 from __future__ import annotations
 
+import unicodedata
 from itertools import combinations
 
 import numpy as np
@@ -22,6 +23,18 @@ from app.services.kg.llm_adapter import _embed, llm_model_func
 from app.services.kg.so_hieu import SO_HIEU_RE  # noqa: F401 — re-exported cho code cũ import từ đây
 
 _MERGE_TAG = "<MERGED_FROM>"
+
+
+def _strip_diacritics(text: str) -> str:
+    """Bỏ dấu tiếng Việt — LLM đôi khi extract entity name KHÔNG dấu (vd "Mat Khau" thay vì
+    "Mật Khẩu" cho CÙNG 1 khái niệm ở 2 document khác nhau) — verify được thật lúc chạy 10
+    document mẫu: node "Mat Khau" (từ QĐ401) và "Mật Khẩu" (từ QĐ215/TT09/QĐ342) không được
+    resolve_fuzzy_concepts() gộp (embedding trên bare name không đủ gần), khiến giá trị mật
+    khẩu xung đột của QĐ401 "biến mất" khỏi bundle theo khái niệm. NFD decompose + lọc
+    combining mark xử lý hầu hết dấu; 'đ'/'Đ' phải map tay (không tách qua NFD)."""
+    text = text.replace("đ", "d").replace("Đ", "D")
+    nfd = unicodedata.normalize("NFD", text)
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
 
 
 def merge_node(session, keep_id: str, drop_id: str) -> None:
@@ -129,6 +142,41 @@ def resolve_vanban(driver: Driver) -> dict:
                     merge_node(session, keep, m["name"])
                     merges.append((so_hieu, m["name"], keep))
         return {"so_hieu_groups": len(groups), "merges": merges}
+
+
+# ------------------------------------------------------------------ Tier 1.5: diacritics-normalized
+# (KhaiNiem/GiaTriQuyDinh trùng tên sau khi bỏ dấu — deterministic, không cần LLM/embedding;
+# chạy TRƯỚC resolve_fuzzy_concepts để giảm số candidate embedding phải xét)
+
+def resolve_diacritics_duplicates(driver: Driver, entity_type: str) -> dict:
+    """Gộp node CÙNG entity_type mà tên chỉ khác nhau ở dấu tiếng Việt — khớp CHÍNH XÁC sau
+    khi bỏ dấu + casefold là tín hiệu đủ chắc để tự merge (không cần LLM xác nhận thêm,
+    khác hẳn candidate embedding ở resolve_fuzzy_concepts vốn chỉ đủ tin cậy cho tên
+    KHÁC NHAU thật sự về mặt chữ)."""
+    with driver.session() as session:
+        rows = session.run(
+            "MATCH (n {entity_type: $t}) RETURN n.entity_id as name, "
+            "size(coalesce(n.description,'')) as desc_len",
+            t=entity_type,
+        ).data()
+
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        key = _strip_diacritics(row["name"]).casefold().strip()
+        if key:
+            groups.setdefault(key, []).append(row)
+
+    merges = []
+    with driver.session() as session:
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            keep = max(members, key=lambda r: r["desc_len"])["name"]
+            for m in members:
+                if m["name"] != keep:
+                    merge_node(session, keep, m["name"])
+                    merges.append((m["name"], keep))
+    return {"groups_checked": len(groups), "merges": merges}
 
 
 # ------------------------------------------------------------------ Tier 2: KhaiNiem/GiaTriQuyDinh

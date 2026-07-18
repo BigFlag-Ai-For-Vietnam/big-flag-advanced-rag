@@ -104,7 +104,14 @@ class Settings(BaseSettings):
     # --- Knowledge Graph build (LightRAG + ontology) — chạy lúc ingest, nền, không chặn Qdrant ---
     kg_enable_build: bool = False
     kg_categories: list[str] = ["tuan_thu"]     # ontology hiện chỉ verify đúng domain này
-    kg_max_concurrent_builds: int = 2           # bounded — LightRAG tốn nhiều LLM call
+    # PHẢI = 1 (đã verify bằng chạy thật): LightRAG's document-processing queue
+    # (`pipeline_status["busy"]`) là singleton theo `workspace` (mặc định "" — dùng chung
+    # cho MỌI document, bắt buộc vì cần 1 graph chung cross-document, không thể tách
+    # workspace riêng từng doc). >1 build đồng thời -> document "thua" cuộc đua chỉ tự
+    # đánh dấu "queued" trong pipeline_status rồi RETURN ngay, không hề tự chạy loop xử lý
+    # queue của chính nó (loop đó thuộc về LightRAG instance khác, doc_status riêng) ->
+    # 0 entity được extract cho document đó dù ainsert() "thành công" không lỗi gì.
+    kg_max_concurrent_builds: int = 1
 
     # --- Eval / MLflow ---
     # Mặc định localhost phục vụ CLI chạy trên host; backend chạy trong container

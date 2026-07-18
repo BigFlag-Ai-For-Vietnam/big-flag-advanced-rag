@@ -1,8 +1,8 @@
-"""Orchestration cho graph-build 1 document — chạy NỀN (ThreadPoolExecutor riêng), KHÔNG
-chặn Qdrant indexing (Stage C của pipeline.py chạy ngay sau khi `submit_graph_build()` trả
-về, không đợi). Chỉ được gọi từ `pipeline.py` khi `kg_enable_build=True` và
-`document.category` thuộc `kg_categories` (mặc định chỉ "tuan_thu" — ontology hiện chỉ
-verify đúng domain này).
+"""Orchestration cho graph-build 1 document — chạy NỀN trên 1 event loop dùng chung, sống
+suốt vòng đời process (xem `_get_loop()`), KHÔNG chặn Qdrant indexing (Stage C của
+pipeline.py chạy ngay sau khi `submit_graph_build()` trả về, không đợi). Chỉ được gọi từ
+`pipeline.py` khi `kg_enable_build=True` và `document.category` thuộc `kg_categories`
+(mặc định chỉ "tuan_thu" — ontology hiện chỉ verify đúng domain này).
 
 Thứ tự bắt buộc (Extractor -> Validator/Resolver -> Graph Writer đã nằm trong
 `graph_storage.OntologyValidatingGraphStorage`; phần dưới đây là hậu xử lý SAU khi
@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
+import threading
 
 from lightrag import LightRAG
 from lightrag.kg.shared_storage import initialize_pipeline_status
@@ -48,26 +48,64 @@ logger = logging.getLogger("kg.build_service")
 
 _WORKING_DIR = os.path.join(settings.data_dir, "kg_lightrag_storage")
 
-_GRAPH_EXECUTOR = ThreadPoolExecutor(
-    max_workers=settings.kg_max_concurrent_builds, thread_name_prefix="kg-build"
-)
+# 1 event loop DUY NHẤT, sống suốt vòng đời process, chạy trong 1 thread nền riêng —
+# KHÔNG dùng asyncio.run() mỗi lần build (đã vỡ thật lúc test tải: LightRAG's
+# shared_storage giữ asyncio.Lock() global cấp MODULE, 1 khi bound vào 1 event loop thì
+# mọi lần acquire SAU đó phải cùng loop, nếu không crash "bound to a different event
+# loop" — asyncio.run() tạo loop mới mỗi lần gọi nên document build thứ 2 trở đi luôn
+# crash). Semaphore (tạo lazy TRONG loop) giới hạn số build chạy đồng thời = kg_max_concurrent_builds.
+_loop: asyncio.AbstractEventLoop | None = None
+_loop_lock = threading.Lock()
+_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_loop() -> asyncio.AbstractEventLoop:
+    global _loop
+    if _loop is not None:
+        return _loop
+    with _loop_lock:
+        if _loop is not None:
+            return _loop
+        ready = threading.Event()
+
+        def _run() -> None:
+            global _loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            _loop = loop
+            ready.set()
+            loop.run_forever()
+
+        threading.Thread(target=_run, name="kg-build-loop", daemon=True).start()
+        ready.wait()
+        return _loop
+
+
+async def _get_semaphore() -> asyncio.Semaphore:
+    # asyncio.Semaphore bind vào loop hiện hành lúc khởi tạo — PHẢI tạo lazy bên trong 1
+    # coroutine đang chạy trên _loop, không tạo ở module level (loop chưa tồn tại lúc import).
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(settings.kg_max_concurrent_builds)
+    return _semaphore
 
 
 def submit_graph_build(document_id: str, title: str, chunk_texts: list[str]) -> None:
-    """Điểm vào cho pipeline.py — trả về NGAY, build chạy nền trong _GRAPH_EXECUTOR."""
-    _GRAPH_EXECUTOR.submit(_run_in_thread, document_id, title, chunk_texts)
+    """Điểm vào cho pipeline.py — trả về NGAY, build chạy nền trên event loop dùng chung."""
+    loop = _get_loop()
+    asyncio.run_coroutine_threadsafe(_run_bounded(document_id, title, chunk_texts), loop)
 
 
-def _run_in_thread(document_id: str, title: str, chunk_texts: list[str]) -> None:
-    """Chạy trong thread riêng của _GRAPH_EXECUTOR — tự mở SessionLocal() RIÊNG chỉ để cập
-    nhật graph_status cuối, KHÔNG chia sẻ session/ORM object với thread pipeline.py."""
-    try:
-        stats = asyncio.run(build_graph_for_document(document_id, title, chunk_texts))
-        logger.info("[kg.build_service] xong document %s: %s", document_id, stats)
-        _mark_status(document_id, GraphStatus.ready)
-    except Exception as exc:  # noqa: BLE001 — thread nền, KHÔNG được để exception rơi mất
-        logger.exception("[kg.build_service] lỗi cho document %s", document_id)
-        _mark_status(document_id, GraphStatus.failed, error=str(exc)[:2000])
+async def _run_bounded(document_id: str, title: str, chunk_texts: list[str]) -> None:
+    sem = await _get_semaphore()
+    async with sem:
+        try:
+            stats = await build_graph_for_document(document_id, title, chunk_texts)
+            logger.info("[kg.build_service] xong document %s: %s", document_id, stats)
+            _mark_status(document_id, GraphStatus.ready)
+        except Exception as exc:  # noqa: BLE001 — thread nền, KHÔNG được để exception rơi mất
+            logger.exception("[kg.build_service] lỗi cho document %s", document_id)
+            _mark_status(document_id, GraphStatus.failed, error=str(exc)[:2000])
 
 
 def _mark_status(document_id: str, status: GraphStatus, error: str | None = None) -> None:
@@ -165,6 +203,11 @@ async def build_graph_for_document(document_id: str, title: str, chunk_texts: li
             logger.exception("[kg.build_service] citation_extractor/dedupe lỗi cho %s", document_id)
 
         try:
+            # Diacritics-normalized TRƯỚC embedding fuzzy: rẻ, deterministic, giảm số
+            # candidate embedding phải xét — bắt được ca LLM extract KHÔNG dấu (vd "Mat
+            # Khau" vs "Mật Khẩu") mà embedding trên bare name không đủ gần để tự gộp.
+            stats["resolve_diacritics_khainiem"] = entity_resolution.resolve_diacritics_duplicates(driver, "KhaiNiem")
+            stats["resolve_diacritics_giatriquydinh"] = entity_resolution.resolve_diacritics_duplicates(driver, "GiaTriQuyDinh")
             stats["resolve_khainiem"] = await entity_resolution.resolve_fuzzy_concepts(driver, "KhaiNiem")
             stats["resolve_giatriquydinh"] = await entity_resolution.resolve_fuzzy_concepts(driver, "GiaTriQuyDinh")
         except Exception:  # noqa: BLE001
