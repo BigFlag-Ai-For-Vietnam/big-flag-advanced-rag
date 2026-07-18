@@ -50,7 +50,9 @@ make up    # starts infra/ (Qdrant + MLflow + RustFS + Postgres) detached, then 
 # The app compose has NO qdrant service: backend joins the infra stack's attachable
 # `rag-infra` network and reaches qdrant:6333 / mlflow:5000 by service name,
 # so the infra stack must be up first (make up handles the ordering).
-# Qdrant dashboard: :6333/dashboard | Backend Swagger: :8000/docs | Frontend: :5173 | MLflow: :5000
+# Qdrant dashboard: :6333/dashboard | App + Swagger: http(s)://localhost và /docs — nginx (infra/)
+# là đường vào duy nhất trên 80/443, serve frontend + proxy /api; backend/frontend không publish
+# :8000/:5173 ra host | MLflow: :5000
 
 # Backend local
 cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload

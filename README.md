@@ -87,8 +87,9 @@ make up     # up infra (Qdrant + MLflow + RustFS + Postgres) detached, rồi bac
 ở gốc repo — backend nối vào network `rag-infra` của stack infra để gọi Qdrant/MLflow.)
 
 - Qdrant: http://localhost:6333/dashboard
-- Backend (Swagger): http://localhost:8000/docs
-- Frontend: http://localhost:5173
+- App (frontend, qua nginx): http://localhost — hoặc https://localhost (cert self-signed)
+- Backend Swagger (qua nginx): http://localhost/docs — backend/frontend KHÔNG publish
+  :8000/:5173 ra host, đường vào duy nhất là nginx 80/443 (stack `infra/`)
 - MLflow: http://localhost:5000
 
 ## Chạy local (không Docker)
