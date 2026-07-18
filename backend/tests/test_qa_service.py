@@ -1,5 +1,5 @@
 """Test dịch vụ QA dùng chung (FR-11) — offline, monkeypatch retrieval/LLM."""
-from app.schemas.playground import Citation
+from app.schemas.playground import Citation, GraphFact
 from app.services import qa_service
 
 
@@ -34,3 +34,20 @@ def test_messages_identical_to_playground():
 
     empty_messages = qa_service.build_messages("Câu hỏi?", [])
     assert "(không có ngữ cảnh)" in empty_messages[1]["content"]
+
+
+def test_advanced_messages_include_graph_facts():
+    fact = GraphFact(
+        fact_id="f1",
+        source_entity="QĐ342",
+        source_type="Document",
+        relation="THAY_THE",
+        target_entity="QĐ215",
+        target_type="Document",
+        source_document_title="Quyết định 342",
+    )
+    messages = qa_service.build_advanced_messages("Bản nào hiện hành?", [], [], [], [fact])
+
+    assert "TRI THỨC ĐỒ THỊ" in messages[1]["content"]
+    assert "QĐ342 --THAY_THE--> QĐ215" in messages[1]["content"]
+    assert "không trỏ vào tri thức đồ thị" in messages[0]["content"]

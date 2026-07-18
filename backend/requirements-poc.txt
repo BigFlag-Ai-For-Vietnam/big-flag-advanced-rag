@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# --- PoC: knowledge graph noise reduction qua ontology (backend/poc/kg_ontology) ---
+lightrag-hku==1.5.4
+pyvis==0.3.2
+networkx==3.6.1
+neo4j==5.28.1
+PyYAML==6.0.2

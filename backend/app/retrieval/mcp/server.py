@@ -28,6 +28,9 @@ def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
 
     Trả về:
     - citations: danh sách (document_id, title, chunk_index, score, final_content)
+    - graph_facts: quan hệ/thực thể lấy từ knowledge graph (Neo4j) — KHÔNG phải trích dẫn
+      nguyên văn, dùng để suy luận quan hệ/xung đột/thay thế giữa văn bản (rỗng nếu
+      RETRIEVAL_ENABLE_GRAPH=false hoặc Neo4j chưa cấu hình).
     - normalized_question / rewritten_question: câu hỏi sau từng bước xử lý
     - tool_calls: danh sách tool đã gọi trong lúc retrieval (tool, args, hit_count)
       — phục vụ debug/quan sát pipeline, không ảnh hưởng tới việc dùng citations.
@@ -37,9 +40,13 @@ def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
     """
     logger.info("[mcp.retrieve] question=%r top_k=%s", question, top_k)
     result = engine.retrieve(question, top_k)
-    logger.info("[mcp.retrieve] trả về %s citation(s)", len(result["citations"]))
+    logger.info(
+        "[mcp.retrieve] trả về %s citation(s), %s graph fact(s)",
+        len(result["citations"]), len(result["graph_facts"]),
+    )
     return RetrieveResult(
         citations=result["citations"],
+        graph_facts=result["graph_facts"],
         normalized_question=result["normalized_question"],
         rewritten_question=result["rewritten_question"],
         tool_calls=result["tool_calls"],

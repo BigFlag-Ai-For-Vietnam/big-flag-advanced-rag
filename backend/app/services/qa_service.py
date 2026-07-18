@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Document
-from app.schemas.playground import CatalogInfo, Citation, SubgoalCoverage
+from app.schemas.playground import CatalogInfo, Citation, GraphFact, SubgoalCoverage
 from app.services import catalog_service, embedding_service, llm_client, qdrant_service
 
 SYSTEM_PROMPT = (
@@ -18,6 +18,10 @@ ADVANCED_SYSTEM_PROMPT = (
     "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
     "CATALOG là bản đồ mục lục của tài liệu (chỉ tên mục, không có giá trị) — dùng để trả "
     "lời ĐẦY ĐỦ, đặc biệt câu hỏi liệt kê (đối chiếu catalog xem đã đủ mục chưa). "
+    "TRI THỨC ĐỒ THỊ (nếu có) là quan hệ giữa văn bản/khái niệm (căn cứ/thay thế/tham chiếu/"
+    "ưu tiên hơn, hoặc nhiều giá trị khác nhau cho cùng 1 khái niệm) — dùng để SUY LUẬN quan "
+    "hệ/xung đột/thay thế xuyên văn bản, KHÔNG phải trích dẫn nguyên văn; trích dẫn [số] vẫn "
+    "chỉ trỏ vào NGỮ CẢNH (đoạn văn bản), không trỏ vào tri thức đồ thị. "
     "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
     "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
 )
@@ -74,8 +78,9 @@ def build_advanced_messages(
     citations: list[Citation],
     catalogs: list[CatalogInfo],
     subgoals: list[SubgoalCoverage],
+    graph_facts: list[GraphFact] | None = None,
 ) -> list[dict]:
-    """Prompt answer của pipeline advanced: evidence + catalog + coverage còn thiếu."""
+    """Prompt advanced: text evidence + catalog + graph facts + coverage còn thiếu."""
     blocks = [
         f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
         for i, c in enumerate(citations)
@@ -84,6 +89,7 @@ def build_advanced_messages(
     catalog_text = "\n\n".join(
         catalog_service.format_catalog_text(c.title, c.catalog) for c in catalogs
     ).strip()
+    graph_text = _format_graph_facts(graph_facts or [])
     missing = [
         f"- {s.description}: {s.note or 'chưa đủ bằng chứng'}"
         for s in subgoals
@@ -93,6 +99,11 @@ def build_advanced_messages(
     parts = [f"NGỮ CẢNH:\n{context}"]
     if catalog_text:
         parts.append(f"CATALOG:\n{catalog_text}")
+    if graph_text:
+        parts.append(
+            "TRI THỨC ĐỒ THỊ (quan hệ giữa văn bản/khái niệm — KHÔNG phải trích dẫn nguyên văn):\n"
+            + graph_text
+        )
     if missing:
         parts.append(
             "PHẦN CÒN THIẾU BẰNG CHỨNG (nêu rõ trong câu trả lời, KHÔNG bịa):\n"
@@ -103,6 +114,20 @@ def build_advanced_messages(
         {"role": "system", "content": ADVANCED_SYSTEM_PROMPT},
         {"role": "user", "content": "\n\n".join(parts)},
     ]
+
+
+def _format_graph_facts(graph_facts: list[GraphFact]) -> str:
+    lines: list[str] = []
+    for fact in graph_facts:
+        properties = f" ({fact.properties})" if fact.properties else ""
+        source = (
+            f" [nguồn: {fact.source_document_title}]" if fact.source_document_title else ""
+        )
+        lines.append(
+            f"- {fact.source_entity} --{fact.relation}--> "
+            f"{fact.target_entity}{properties}{source}"
+        )
+    return "\n".join(lines)
 
 
 def answer(question: str, top_k: int) -> tuple[str, list[Citation]]:

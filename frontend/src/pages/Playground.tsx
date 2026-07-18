@@ -5,6 +5,7 @@ import {
   mcpRetrieve,
   type CatalogInfo,
   type Citation,
+  type GraphFact,
   type McpRetrieveConfig,
   type SubgoalCoverage,
   type ToolCallTrace,
@@ -12,6 +13,7 @@ import {
 import { cn } from "../lib/cn";
 import CatalogTree from "../components/CatalogTree";
 import { CitationList, CoveragePanel } from "../components/RetrievalEvidence";
+import GraphEvidence from "../components/GraphEvidence";
 
 const SUGGESTIONS = [
   "Quyền lợi bảo hiểm chính là gì?",
@@ -25,6 +27,7 @@ export default function PlaygroundPage() {
   const [topK, setTopK] = useState(5);
   const [answer, setAnswer] = useState("");
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [graphFacts, setGraphFacts] = useState<GraphFact[]>([]);
   const [catalogs, setCatalogs] = useState<CatalogInfo[]>([]);
   const [coverage, setCoverage] = useState<SubgoalCoverage[]>([]);
   const [busy, setBusy] = useState(false);
@@ -39,6 +42,7 @@ export default function PlaygroundPage() {
     setAsked(query);
     setAnswer("");
     setCitations([]);
+    setGraphFacts([]);
     setCatalogs([]);
     setCoverage([]);
     setError(null);
@@ -69,6 +73,7 @@ export default function PlaygroundPage() {
           try {
             const evt = JSON.parse(data);
             if (evt.type === "citations") setCitations(evt.citations);
+            else if (evt.type === "graph_facts") setGraphFacts(evt.graph_facts);
             else if (evt.type === "catalogs") setCatalogs(evt.catalogs);
             else if (evt.type === "coverage") setCoverage(evt.subgoals);
             else if (evt.type === "token") setAnswer((p) => p + evt.content);
@@ -204,6 +209,8 @@ export default function PlaygroundPage() {
           {/* Coverage (agentic planning: mỗi sub-goal đã đủ bằng chứng chưa) */}
           {coverage.length > 0 && <CoveragePanel subgoals={coverage} />}
 
+          {graphFacts.length > 0 && <GraphEvidence facts={graphFacts} />}
+
           {/* Catalog (bản đồ mục lục agent dùng để đánh giá độ đầy đủ) */}
           {catalogs.length > 0 && (
             <div>
@@ -242,6 +249,7 @@ function McpPlaygroundPanel() {
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(5);
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [graphFacts, setGraphFacts] = useState<GraphFact[]>([]);
   const [normalizedQuestion, setNormalizedQuestion] = useState("");
   const [rewrittenQuestion, setRewrittenQuestion] = useState("");
   const [toolCalls, setToolCalls] = useState<ToolCallTrace[]>([]);
@@ -258,11 +266,13 @@ function McpPlaygroundPanel() {
     setAsked(q);
     setError(null);
     setCitations([]);
+    setGraphFacts([]);
     setToolCalls([]);
     setSubgoals([]);
     try {
       const res = await mcpRetrieve(q, topK);
       setCitations(res.citations);
+      setGraphFacts(res.graph_facts ?? []);
       setNormalizedQuestion(res.normalized_question);
       setRewrittenQuestion(res.rewritten_question);
       setToolCalls(res.tool_calls);
@@ -368,6 +378,8 @@ function McpPlaygroundPanel() {
               </div>
 
               {subgoals.length > 0 && <CoveragePanel subgoals={subgoals} />}
+
+              {graphFacts.length > 0 && <GraphEvidence facts={graphFacts} />}
 
               {citations.length > 0 ? (
                 <CitationList citations={citations} />

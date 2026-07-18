@@ -3,6 +3,7 @@ import os
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
@@ -16,7 +17,12 @@ if settings.db_url.startswith("sqlite:///"):
     if parent:
         os.makedirs(parent, exist_ok=True)
 
-engine = create_engine(settings.db_url, connect_args=connect_args, future=True)
+# NullPool cho SQLite: nhiều thread mở SessionLocal() riêng cùng lúc (BackgroundTasks +
+# kg-build loop) — QueuePool mặc định (size=5, overflow=10) hết chỗ dưới tải thật, timeout
+# 30s rồi 500 (đã bắt gặp lúc test thật: upload document thứ 9 lỗi vì hết pool). SQLite mở
+# connection rẻ nên bỏ giới hạn pool thay vì đoán số cố định.
+engine_kwargs = {"poolclass": NullPool} if settings.db_url.startswith("sqlite") else {}
+engine = create_engine(settings.db_url, connect_args=connect_args, future=True, **engine_kwargs)
 
 
 @event.listens_for(engine, "connect")
@@ -76,6 +82,9 @@ def _auto_migrate_sqlite() -> None:
         "supersedes_id": "VARCHAR(36)",
         "superseded_by_id": "VARCHAR(36)",
         "supersession_note": "TEXT",
+        # --- Knowledge Graph build (Neo4j via LightRAG) ---
+        "graph_status": "VARCHAR(20)",
+        "graph_error_message": "TEXT",
     }
     with engine.begin() as conn:
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(documents)")}

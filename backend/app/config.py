@@ -91,7 +91,42 @@ class Settings(BaseSettings):
     # Bật: loại HẲN văn bản đã hết hiệu lực/bị thay thế (is_active=false) khỏi retrieval
     # (cả 2 kênh dense + BM25 + catalog) → câu trả lời luôn dùng bản hiện hành.
     # Tắt (false): tìm cả văn bản đã hết hiệu lực (để demo so sánh RAG có/không versioning).
+    # LƯU Ý (rủi ro đã biết, chưa xử lý tự động): tính năng này và Knowledge Graph bên dưới
+    # cùng nhắm giải quyết P1 (supersession) nhưng bằng 2 cơ chế khác hẳn nhau — is_active
+    # là hard filter (loại HẲN khỏi retrieval), còn graph để LLM tự suy luận nuance (vd "văn
+    # bản bị thay thế nhưng 1 phụ lục vẫn còn hiệu lực" — xem THAY_THE.partial trong
+    # graph_service). Nếu gọi API .../supersede để đánh dấu 1 document tuân thủ có kiểu
+    # exception này (is_active=false), toàn bộ chunk của nó — kể cả phần phụ lục vẫn hiệu
+    # lực — sẽ biến mất khỏi retrieval, ghi đè mất khả năng suy luận nuance của graph. Đừng
+    # dùng endpoint supersede cho các document tuân thủ có exception kiểu này; để nguyên
+    # is_active=true và dựa vào graph_facts (THAY_THE + partial) xử lý.
     retrieval_exclude_inactive: bool = True
+
+    # --- Knowledge Graph (Neo4j) — đọc lúc query ---
+    neo4j_uri: str = "bolt://neo4j:7687"
+    neo4j_username: str = "neo4j"
+    neo4j_password: str = ""
+    # Bật graph baseline trong retrieval engine — mặc định tắt, chỉ bật sau khi graph đã
+    # build (graph_service.stats() không rỗng), tránh giai đoạn "bật nhưng graph rỗng".
+    retrieval_enable_graph: bool = False
+    retrieval_graph_citation_hops: int = 1
+    retrieval_graph_concept_top_k: int = 5
+    retrieval_graph_max_facts_per_subgoal: int = 6
+    # Model embedding tiếng Việt cho similarity thấp hơn trực giác (calibrate thật ở PoC:
+    # 1 cặp chắc chắn đúng chỉ đạt ~0.62) — KHÔNG dùng threshold mặc định kiểu 0.8.
+    retrieval_graph_concept_embedding_threshold: float = 0.65
+
+    # --- Knowledge Graph build (LightRAG + ontology) — chạy lúc ingest, nền, không chặn Qdrant ---
+    kg_enable_build: bool = False
+    kg_categories: list[str] = ["van_ban_tuan_thu"]     # ontology hiện chỉ verify đúng domain này
+    # PHẢI = 1 (đã verify bằng chạy thật): LightRAG's document-processing queue
+    # (`pipeline_status["busy"]`) là singleton theo `workspace` (mặc định "" — dùng chung
+    # cho MỌI document, bắt buộc vì cần 1 graph chung cross-document, không thể tách
+    # workspace riêng từng doc). >1 build đồng thời -> document "thua" cuộc đua chỉ tự
+    # đánh dấu "queued" trong pipeline_status rồi RETURN ngay, không hề tự chạy loop xử lý
+    # queue của chính nó (loop đó thuộc về LightRAG instance khác, doc_status riêng) ->
+    # 0 entity được extract cho document đó dù ainsert() "thành công" không lỗi gì.
+    kg_max_concurrent_builds: int = 1
 
     # --- Eval / MLflow ---
     # Mặc định localhost phục vụ CLI chạy trên host; backend chạy trong container

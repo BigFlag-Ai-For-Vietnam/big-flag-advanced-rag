@@ -122,6 +122,7 @@ async def _run_advanced(req: ShowcaseCompareRequest, queue: asyncio.Queue, start
                 "pipeline": pipeline,
                 "retrieval_ms": retrieval_ms,
                 "citations": [c.model_dump() for c in result.citations],
+                "graph_facts": [fact.model_dump() for fact in result.graph_facts],
                 "catalogs": [c.model_dump() for c in catalogs],
                 "normalized_question": result.normalized_question,
                 "rewritten_question": result.rewritten_question,
@@ -133,7 +134,11 @@ async def _run_advanced(req: ShowcaseCompareRequest, queue: asyncio.Queue, start
         first_token_ms: int | None = None
         async for delta in llm_client.chat_stream_async(
             qa_service.build_advanced_messages(
-                req.question, result.citations, catalogs, result.subgoals
+                req.question,
+                result.citations,
+                catalogs,
+                result.subgoals,
+                result.graph_facts,
             ),
             temperature=0.2,
             max_tokens=1024,
@@ -154,6 +159,7 @@ async def _run_advanced(req: ShowcaseCompareRequest, queue: asyncio.Queue, start
                 "first_token_ms": first_token_ms,
                 "total_ms": _elapsed_ms(started),
                 "citation_count": len(result.citations),
+                "graph_fact_count": len(result.graph_facts),
             },
             terminal=True,
         )

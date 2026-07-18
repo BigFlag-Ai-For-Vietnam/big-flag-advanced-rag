@@ -7,10 +7,12 @@ import {
   uploadDocument,
   type CatalogPreset,
   type DocStatus,
+  type GraphStatus,
 } from "../api/client";
 import { STATUS_META } from "../lib/status";
 import Dropzone from "../components/Dropzone";
 import PipelineStepper from "../components/PipelineStepper";
+import GraphStatusPanel from "../components/GraphStatus";
 import { useToast } from "../lib/toast";
 import { cn } from "../lib/cn";
 
@@ -26,6 +28,10 @@ export default function UploadPage() {
   const [docId, setDocId] = useState<string | null>(null);
   const [status, setStatus] = useState<DocStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [graphStatus, setGraphStatus] = useState<GraphStatus>("not_built");
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const [graphEligible, setGraphEligible] = useState(false);
+  const [graphEnabled, setGraphEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -62,9 +68,22 @@ export default function UploadPage() {
         const s = await getStatus(id);
         setStatus(s.status);
         setError(s.error_message);
-        if (TERMINAL.includes(s.status)) {
+        setGraphStatus(s.graph_status);
+        setGraphError(s.graph_error_message);
+        setGraphEligible(s.graph_eligible);
+        setGraphEnabled(s.graph_build_enabled);
+        const vectorTerminal = TERMINAL.includes(s.status);
+        const graphExpected = s.graph_eligible && s.graph_build_enabled;
+        const graphTerminal = !graphExpected
+          || s.graph_status === "ready"
+          || s.graph_status === "failed"
+          || (s.status === "failed" && s.graph_status === "not_built");
+        if (vectorTerminal && graphTerminal) {
           if (timer.current) window.clearInterval(timer.current);
-          if (s.status === "indexed") toast.push("success", "Xử lý tài liệu hoàn tất!");
+          if (s.status === "indexed" && s.graph_status === "ready")
+            toast.push("success", "Vector Store và Knowledge Graph đã sẵn sàng!");
+          else if (s.status === "indexed")
+            toast.push("success", "Vector Store đã sẵn sàng.");
           if (s.status === "failed") toast.push("error", "Pipeline gặp lỗi khi xử lý.");
         }
       } catch {
@@ -85,6 +104,10 @@ export default function UploadPage() {
       });
       setDocId(doc.id);
       setStatus(doc.status);
+      setGraphStatus(doc.graph_status);
+      setGraphError(doc.graph_error_message);
+      setGraphEligible(doc.graph_eligible);
+      setGraphEnabled(doc.graph_build_enabled);
       toast.push("info", "Đã tải lên, pipeline bắt đầu chạy…");
       poll(doc.id);
     } catch (e: any) {
@@ -102,6 +125,10 @@ export default function UploadPage() {
     setDocId(null);
     setStatus(null);
     setError(null);
+    setGraphStatus("not_built");
+    setGraphError(null);
+    setGraphEligible(false);
+    setGraphEnabled(false);
   };
 
   const done = status === "indexed";
@@ -183,7 +210,10 @@ export default function UploadPage() {
           {done && (
             <div className="animate-fade-in mt-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3.5">
               <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                Tài liệu đã sẵn sàng để hỏi–đáp.
+                Vector Store đã sẵn sàng để hỏi–đáp
+                {graphEligible && graphEnabled && graphStatus === "building"
+                  ? "; Knowledge Graph vẫn đang được bổ sung."
+                  : "."}
               </p>
               <button
                 onClick={() => nav("/playground")}
@@ -216,7 +246,21 @@ export default function UploadPage() {
               )}
             </div>
             {status ? (
-              <PipelineStepper status={status} />
+              <div className="space-y-5">
+                <div>
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Vector Store</p>
+                  <PipelineStepper status={status} />
+                </div>
+                <div className="border-t pt-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Knowledge Graph</p>
+                  <GraphStatusPanel
+                    status={graphStatus}
+                    eligible={graphEligible}
+                    enabled={graphEnabled}
+                    error={graphError}
+                  />
+                </div>
+              </div>
             ) : (
               <p className="py-8 text-center text-sm text-muted">
                 Chọn một file PDF và bắt đầu để theo dõi pipeline tại đây.

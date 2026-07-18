@@ -28,6 +28,7 @@ from app.retrieval.mcp import client as retrieval_client
 from app.schemas.playground import (
     CatalogInfo,
     Citation,
+    GraphFact,
     McpRetrieveConfig,
     McpRetrieveRequest,
     McpRetrieveResponse,
@@ -42,9 +43,11 @@ logger = logging.getLogger("playground")
 
 # ------------------------- retrieval -------------------------
 
-async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[SubgoalCoverage]]:
-    """Gọi Retrieval Engine (agentic planning) qua MCP → citations + coverage từng sub-goal.
-    Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning)."""
+async def _retrieve(
+    question: str, top_k: int
+) -> tuple[list[Citation], list[GraphFact], list[SubgoalCoverage]]:
+    """Gọi Retrieval Engine (agentic planning) qua MCP → citations + graph_facts + coverage
+    từng sub-goal. Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning, không graph)."""
     with tracing.span(
         "retrieve",
         span_type=tracing.RETRIEVER,
@@ -52,16 +55,21 @@ async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[Sub
     ) as span:
         try:
             result = await retrieval_client.retrieve(question, top_k)
-            citations, subgoals = result.citations, result.subgoals
+            citations, graph_facts, subgoals = result.citations, result.graph_facts, result.subgoals
             fallback = False
         except Exception as exc:  # noqa: BLE001 — MCP down/lỗi -> fallback
             logger.warning("Retrieval Engine (MCP) lỗi, fallback Qdrant trực tiếp: %s", exc)
-            citations, subgoals, fallback = _simple_retrieve(question, top_k), [], True
+            citations, graph_facts, subgoals, fallback = _simple_retrieve(question, top_k), [], [], True
         tracing.set_outputs(
             span,
-            {"num_citations": len(citations), "num_subgoals": len(subgoals), "fallback": fallback},
+            {
+                "num_citations": len(citations),
+                "num_graph_facts": len(graph_facts),
+                "num_subgoals": len(subgoals),
+                "fallback": fallback,
+            },
         )
-        return citations, subgoals
+        return citations, graph_facts, subgoals
 
 
 def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
@@ -91,8 +99,11 @@ def _build_messages(
     citations: list[Citation],
     catalogs: list[CatalogInfo],
     subgoals: list[SubgoalCoverage],
+    graph_facts: list[GraphFact],
 ) -> list[dict]:
-    return qa_service.build_advanced_messages(question, citations, catalogs, subgoals)
+    return qa_service.build_advanced_messages(
+        question, citations, catalogs, subgoals, graph_facts
+    )
 
 
 def _sse(payload: dict) -> str:
@@ -115,22 +126,23 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
         inputs={"question": req.question},
         attributes={"top_k": req.top_k, "stream": False},
     ) as root:
-        citations, coverage = await _retrieve(req.question, req.top_k)
+        citations, graph_facts, coverage = await _retrieve(req.question, req.top_k)
         catalogs = _fetch_catalogs(db, citations)
         with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
             answer = llm_client.chat(
-                _build_messages(req.question, citations, catalogs, coverage),
+                _build_messages(req.question, citations, catalogs, coverage, graph_facts),
                 temperature=0.2, max_tokens=1024, tag="qa",
             )
             tracing.set_outputs(gen, {"answer_chars": len(answer)})
         tracing.set_outputs(
-            root, {"answer_chars": len(answer), "num_citations": len(citations)}
+            root,
+            {"answer_chars": len(answer), "num_citations": len(citations), "num_graph_facts": len(graph_facts)},
         )
-        return QueryResponse(answer=answer, citations=citations, catalogs=catalogs)
+        return QueryResponse(answer=answer, citations=citations, catalogs=catalogs, graph_facts=graph_facts)
 
 
 async def _stream_query(db: Session, req: QueryRequest):
-    """SSE: gửi catalogs + citations trước, rồi stream token, kết thúc [DONE]."""
+    """SSE: gửi catalogs + citations + graph_facts trước, rồi stream token, kết thúc [DONE]."""
     with tracing.span(
         "playground_query",
         span_type=tracing.CHAIN,
@@ -138,21 +150,22 @@ async def _stream_query(db: Session, req: QueryRequest):
         attributes={"top_k": req.top_k, "stream": True},
     ) as root:
         try:
-            citations, coverage = await _retrieve(req.question, req.top_k)
+            citations, graph_facts, coverage = await _retrieve(req.question, req.top_k)
             catalogs = _fetch_catalogs(db, citations)
             yield _sse({"type": "catalogs", "catalogs": [c.model_dump() for c in catalogs]})
             yield _sse({"type": "citations", "citations": [c.model_dump() for c in citations]})
+            yield _sse({"type": "graph_facts", "graph_facts": [f.model_dump() for f in graph_facts]})
             yield _sse({"type": "coverage", "subgoals": [s.model_dump() for s in coverage]})
             with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
                 token_count = 0
                 for delta in llm_client.chat_stream(
-                    _build_messages(req.question, citations, catalogs, coverage),
+                    _build_messages(req.question, citations, catalogs, coverage, graph_facts),
                     temperature=0.2, max_tokens=1024, tag="qa_stream",
                 ):
                     token_count += 1
                     yield _sse({"type": "token", "content": delta})
                 tracing.set_outputs(gen, {"token_deltas": token_count})
-            tracing.set_outputs(root, {"num_citations": len(citations)})
+            tracing.set_outputs(root, {"num_citations": len(citations), "num_graph_facts": len(graph_facts)})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Stream lỗi")
             yield _sse({"type": "error", "message": str(exc)})
@@ -173,6 +186,7 @@ async def mcp_retrieve(req: McpRetrieveRequest):
     )
     return McpRetrieveResponse(
         citations=result.citations,
+        graph_facts=result.graph_facts,
         normalized_question=result.normalized_question,
         rewritten_question=result.rewritten_question,
         tool_calls=result.tool_calls,

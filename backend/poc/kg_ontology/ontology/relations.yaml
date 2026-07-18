@@ -1,0 +1,138 @@
+relation_types:
+  CAN_CU:
+    description: Văn bản A lấy văn bản B làm căn cứ pháp lý / tuân thủ theo B
+    keywords:
+    - căn cứ
+    - tuân thủ
+    - phù hợp với
+    - complies
+    - based on
+    - dựa trên
+  THAM_CHIEU:
+    description: Văn bản A dẫn chiếu tới văn bản B (không phải căn cứ pháp lý, không thay thế)
+    keywords:
+    - tham chiếu
+    - dẫn chiếu
+    - reference
+    - refers to
+    - theo quy định tại
+  THAY_THE:
+    description: Văn bản A thay thế văn bản B — CÓ THỂ chỉ thay thế MỘT PHẦN (kiểm tra kỹ phần nào vẫn
+      giữ hiệu lực)
+    keywords:
+    - thay thế
+    - supersede
+    - replace
+    - hết hiệu lực thi hành
+    properties:
+    - partial
+    - giu_hieu_luc
+  XUNG_DOT:
+    description: Văn bản A và B quy định khác nhau cho CÙNG 1 khái niệm — có thể đã tuyên bố ưu tiên rõ
+      ràng, có thể im lặng (cần cảnh báo), có thể là carve-out pháp luật chuyên ngành (KHÔNG phải xung
+      đột thật, không báo động giả)
+    keywords:
+    - xung đột
+    - mâu thuẫn
+    - conflict
+    - trái với
+    - khác với
+    properties:
+    - loai
+    - uu_tien_cho
+  QUY_DINH:
+    description: Văn bản quy định 1 giá trị/ngưỡng cụ thể
+    keywords:
+    - quy định
+    - yêu cầu
+    - phải có
+    - tối thiểu
+    - tối đa
+  AP_DUNG_CHO:
+    description: 1 giá trị/ngưỡng cụ thể áp dụng cho 1 khái niệm nào
+    keywords:
+    - áp dụng cho
+    - applies to
+    - của
+    - đối với
+allowed_triples:
+- - VanBan
+  - CAN_CU
+  - VanBan
+- - VanBan
+  - THAM_CHIEU
+  - VanBan
+- - VanBan
+  - THAY_THE
+  - VanBan
+- - VanBan
+  - XUNG_DOT
+  - VanBan
+- - VanBan
+  - QUY_DINH
+  - GiaTriQuyDinh
+- - GiaTriQuyDinh
+  - AP_DUNG_CHO
+  - KhaiNiem
+known_relations:
+- source: QD342
+  target: TT09
+  type: CAN_CU
+  evidence: Căn cứ + Điều 3 "phù hợp Điều 6 TT 09", Điều 8 dẫn Điều 12 TT 09
+- source: QD401
+  target: TT09
+  type: CAN_CU
+  evidence: Phần Căn cứ
+- source: QD455
+  target: ND88
+  type: CAN_CU
+  evidence: Căn cứ + Điều 7 dẫn "Điều 8 NĐ 88", Điều 9 dẫn "Điều 13 NĐ 88"
+- source: QD502
+  target: TT04
+  type: CAN_CU
+  evidence: Căn cứ + Điều 4 dẫn "Điều 7 TT 04", Điều 9 dẫn "Điều 3 TT 04"
+- source: QD480
+  target: TT20
+  type: CAN_CU
+  evidence: Căn cứ + Điều 2/4/8 dẫn TT 20
+- source: TT09
+  target: ND88
+  type: CAN_CU
+  evidence: null
+- source: TT04
+  target: ND88
+  type: CAN_CU
+  evidence: null
+- source: TT04
+  target: TT09
+  type: CAN_CU
+  evidence: null
+- source: TT20
+  target: null
+  external_name: Luật Phòng chống rửa tiền 2022
+  type: CAN_CU
+  evidence: null
+- source: QD401
+  target: QD342
+  type: THAM_CHIEU
+  evidence: Điều 4.2 (tuyên bố ưu tiên), Điều 5
+- source: QD502
+  target: QD342
+  type: THAM_CHIEU
+  evidence: Điều 8 (ATTT cho hệ thống AI)
+- source: QD480
+  target: QD455
+  type: THAM_CHIEU
+  evidence: Điều 8 — thời hạn 10 năm áp dụng thay cho 5 năm của QĐ 455
+- source: QD342
+  target: QD215
+  type: THAY_THE
+  partial: true
+  giu_hieu_luc:
+  - Phụ lục 02 — Danh mục hệ thống thông tin trọng yếu
+  evidence: Điều 1.2 thay thế toàn bộ; Điều 1.3 GIỮ hiệu lực Phụ lục 02
+- source: QD215
+  target: null
+  external_name: TT 18/2018/TT-NHNN
+  type: CAN_CU
+  evidence: Phần Căn cứ (luật đời cũ — dangling ref cố ý)

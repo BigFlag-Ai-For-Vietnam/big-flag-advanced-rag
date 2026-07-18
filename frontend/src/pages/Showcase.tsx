@@ -7,6 +7,7 @@ import {
   API_BASE_URL,
   type CatalogInfo,
   type Citation,
+  type GraphFact,
   type ShowcaseMetrics,
   type ShowcasePipeline,
   type ShowcaseTraceStep,
@@ -14,6 +15,7 @@ import {
   type ToolCallTrace,
 } from "../api/client";
 import { CitationList, CoveragePanel } from "../components/RetrievalEvidence";
+import GraphEvidence from "../components/GraphEvidence";
 import { cn } from "../lib/cn";
 import { SHOWCASE_PRESETS } from "./showcasePresets";
 
@@ -24,6 +26,7 @@ interface PipelineResult {
   answer: string;
   error: string | null;
   citations: Citation[];
+  graphFacts: GraphFact[];
   catalogs: CatalogInfo[];
   subgoals: SubgoalCoverage[];
   toolCalls: ToolCallTrace[];
@@ -42,6 +45,7 @@ const emptyResult = (): PipelineResult => ({
   answer: "",
   error: null,
   citations: [],
+  graphFacts: [],
   catalogs: [],
   subgoals: [],
   toolCalls: [],
@@ -90,6 +94,7 @@ export default function ShowcasePage() {
         ...old,
         status: "generating",
         citations: event.citations ?? [],
+        graphFacts: event.graph_facts ?? [],
         catalogs: event.catalogs ?? [],
         subgoals: event.subgoals ?? [],
         toolCalls: event.tool_calls ?? [],
@@ -322,7 +327,7 @@ function PipelineCard({ pipeline, result, liveElapsed }: {
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {(advanced
-            ? ["Normalize", "Rewrite", "Plan", "Hybrid search", "Assess"]
+            ? ["Normalize", "Rewrite", "Plan", "Vector + KG", "Assess"]
             : ["Embed", "Qdrant top-k", "Generate"]
           ).map((step) => <span key={step} className="rounded-full border bg-surface/70 px-2.5 py-1 font-mono text-[10px] text-muted">{step}</span>)}
         </div>
@@ -378,6 +383,7 @@ function PipelineCard({ pipeline, result, liveElapsed }: {
         )}
 
         {result.subgoals.length > 0 && <CoveragePanel subgoals={result.subgoals} />}
+        {advanced && <GraphEvidence facts={result.graphFacts} />}
         {result.citations.length > 0 && <CitationList citations={result.citations} compact />}
       </div>
     </section>

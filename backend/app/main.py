@@ -8,7 +8,7 @@ from app.db import init_db
 from app.retrieval.mcp import client as retrieval_client
 from app.routers import catalog, documents, playground, showcase
 from app.routers import eval as eval_router
-from app.services import tracing
+from app.services import graph_service, pipeline, tracing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -32,6 +32,11 @@ app.include_router(showcase.router)
 @app.on_event("startup")
 async def _startup():
     init_db()
+    recovered = pipeline.recover_interrupted_graph_builds()
+    if recovered:
+        logging.getLogger("pipeline").warning(
+            "Đã chuyển %s graph build bị gián đoạn sang failed", recovered
+        )
     # Khởi tạo MLflow tracing một lần (dời network I/O khỏi request đầu tiên; lỗi -> tắt lặng).
     tracing.configure()
     # Retrieval Engine chạy như service riêng (xem docker-compose.yml, service
@@ -43,6 +48,7 @@ async def _startup():
 @app.on_event("shutdown")
 async def _shutdown():
     await retrieval_client.close()
+    graph_service.close_driver()
 
 
 @app.get("/api/health")

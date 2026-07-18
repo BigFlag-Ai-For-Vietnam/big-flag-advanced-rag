@@ -9,6 +9,8 @@ export const api = axios.create({ baseURL: BASE_URL });
 export type DocStatus =
   | "uploaded" | "parsing" | "parsed" | "chunking" | "indexing" | "indexed" | "failed";
 
+export type GraphStatus = "not_built" | "building" | "ready" | "failed";
+
 export type Lifecycle = "active" | "superseded" | "expired";
 
 export interface DocumentSummary {
@@ -20,6 +22,10 @@ export interface DocumentSummary {
   page_count: number | null;
   chunk_count: number;
   error_message: string | null;
+  graph_status: GraphStatus;
+  graph_error_message: string | null;
+  graph_eligible: boolean;
+  graph_build_enabled: boolean;
   // --- versioning / hiệu lực ---
   doc_no: string | null;
   version_label: string | null;
@@ -41,6 +47,18 @@ export interface ChunkOut {
   qdrant_point_id: string | null; token_count: number | null;
 }
 
+export interface DocumentStatusResponse {
+  id: string;
+  status: DocStatus;
+  page_count: number | null;
+  chunk_count: number;
+  error_message: string | null;
+  graph_status: GraphStatus;
+  graph_error_message: string | null;
+  graph_eligible: boolean;
+  graph_build_enabled: boolean;
+}
+
 export interface CatalogNode { name: string; children: CatalogNode[]; }
 export interface Catalog { tree: CatalogNode[]; }
 export interface CatalogInfo { document_id: string; title: string; catalog: Catalog; }
@@ -56,6 +74,19 @@ export interface Citation {
   document_id: string; title: string; chunk_index: number;
   score: number; final_content: string;
 }
+export interface GraphFact {
+  fact_id: string;
+  source_entity: string;
+  source_type: string;
+  relation: string;
+  target_entity: string;
+  target_type: string;
+  properties: Record<string, unknown>;
+  source_document_title: string;
+  description: string;
+  strategy: string;
+  score: number;
+}
 export interface McpRetrieveConfig {
   normalize: boolean; rewrite: boolean; rerank: boolean; agent_max_steps: number;
 }
@@ -64,9 +95,11 @@ export interface ToolCallTrace {
 }
 export interface SubgoalCoverage {
   description: string; query: string; satisfied: boolean; note: string; evidence_count: number;
+  graph_evidence_count?: number;
 }
 export interface McpRetrieveResponse {
   citations: Citation[];
+  graph_facts: GraphFact[];
   normalized_question: string;
   rewritten_question: string;
   tool_calls: ToolCallTrace[];
@@ -119,8 +152,13 @@ export async function getDocument(id: string): Promise<DocumentDetail> {
   return data;
 }
 
-export async function getStatus(id: string): Promise<DocumentSummary> {
+export async function getStatus(id: string): Promise<DocumentStatusResponse> {
   const { data } = await api.get(`/api/documents/${id}/status`);
+  return data;
+}
+
+export async function rebuildDocumentGraph(id: string): Promise<DocumentStatusResponse> {
+  const { data } = await api.post(`/api/documents/${id}/graph/rebuild`);
   return data;
 }
 

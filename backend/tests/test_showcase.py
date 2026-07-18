@@ -5,7 +5,13 @@ import json
 from pydantic import ValidationError
 
 from app.routers import showcase
-from app.schemas.playground import Citation, RetrieveResult, ShowcaseCompareRequest, SubgoalCoverage
+from app.schemas.playground import (
+    Citation,
+    GraphFact,
+    RetrieveResult,
+    ShowcaseCompareRequest,
+    SubgoalCoverage,
+)
 
 
 def _drain_worker(worker):
@@ -77,8 +83,17 @@ def test_advanced_pipeline_exposes_trace_and_coverage(monkeypatch):
     coverage = SubgoalCoverage(
         description="tìm quy định", query="quy định", satisfied=True, evidence_count=1
     )
+    graph_fact = GraphFact(
+        fact_id="f1",
+        source_entity="QĐ342",
+        source_type="Document",
+        relation="THAY_THE",
+        target_entity="QĐ215",
+        target_type="Document",
+    )
     result = RetrieveResult(
         citations=[citation],
+        graph_facts=[graph_fact],
         normalized_question="q",
         rewritten_question="q rõ hơn",
         tool_calls=[{"tool": "query_vector_store", "args": {"query": "q"}, "hit_count": 1}],
@@ -113,7 +128,9 @@ def test_advanced_pipeline_exposes_trace_and_coverage(monkeypatch):
     assert context["rewritten_question"] == "q rõ hơn"
     assert context["tool_calls"][0]["tool"] == "query_vector_store"
     assert context["subgoals"][0]["satisfied"] is True
+    assert context["graph_facts"][0]["relation"] == "THAY_THE"
     assert events[-1][0]["type"] == "pipeline_done"
+    assert events[-1][0]["graph_fact_count"] == 1
 
 
 def test_compare_stream_keeps_other_pipeline_alive_after_error(monkeypatch):

@@ -4,14 +4,15 @@ import { Link } from "react-router-dom";
 import {
   FileText, Trash2, RefreshCw, Eye, FileStack, UploadCloud,
   GitBranch, Ban, RotateCcw, X, Clock, Archive, ChevronDown, ChevronRight,
-  ArrowRight, Database, SearchCheck, Info, Check,
+  ArrowRight, Database, SearchCheck, Info, Check, Network,
 } from "lucide-react";
 import {
-  deleteDocument, getDocument, listDocuments, reprocessDocument,
+  deleteDocument, getDocument, listDocuments, rebuildDocumentGraph, reprocessDocument,
   supersedeDocument, expireDocument, reactivateDocument, getVersionChain,
   type DocumentDetail, type DocumentSummary, type Lifecycle, type VersionChainItem,
 } from "../api/client";
 import StatusBadge from "../components/StatusBadge";
+import { GraphStatusBadge } from "../components/GraphStatus";
 import Drawer from "../components/Drawer";
 import CatalogTree from "../components/CatalogTree";
 import { useToast } from "../lib/toast";
@@ -132,7 +133,7 @@ export default function DocumentsPage() {
   };
 
   const onDelete = async (d: DocumentSummary) => {
-    if (!confirm(`Xoá "${d.title}"? (kèm pages, chunks và vectors trong Qdrant)`)) return;
+    if (!confirm(`Xoá "${d.title}"? (kèm pages, chunks, vectors trong Qdrant và Knowledge Graph)`)) return;
     setPendingId(d.id);
     try {
       await deleteDocument(d.id);
@@ -141,6 +142,20 @@ export default function DocumentsPage() {
       refresh();
     } catch {
       toast.push("error", "Xoá thất bại.");
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const onGraphBuild = async (d: DocumentSummary) => {
+    if (d.graph_status === "ready" && !confirm(`Build lại Knowledge Graph cho "${d.title}"? Graph cũ sẽ bị thay thế và thao tác này dùng LLM/token.`)) return;
+    setPendingId(d.id);
+    try {
+      await rebuildDocumentGraph(d.id);
+      toast.push("info", d.graph_status === "failed" ? "Đang retry Knowledge Graph…" : "Đang build Knowledge Graph…");
+      await refresh();
+    } catch (e: any) {
+      toast.push("error", e?.response?.data?.detail || "Không thể build Knowledge Graph.");
     } finally {
       setPendingId(null);
     }
@@ -238,6 +253,7 @@ export default function DocumentsPage() {
             onExpire={onExpire}
             onReactivate={onReactivate}
             onReprocess={onReprocess}
+            onGraphBuild={onGraphBuild}
             onDelete={onDelete}
           />
 
@@ -276,6 +292,7 @@ export default function DocumentsPage() {
                   onExpire={onExpire}
                   onReactivate={onReactivate}
                   onReprocess={onReprocess}
+                  onGraphBuild={onGraphBuild}
                   onDelete={onDelete}
                 />
               </div>
@@ -309,6 +326,11 @@ export default function DocumentsPage() {
             {detail.error_message && (
               <pre className="mb-4 overflow-x-auto whitespace-pre-wrap rounded-lg bg-rose-500/10 p-3 font-mono text-xs text-rose-500 ring-1 ring-inset ring-rose-500/25">
                 {detail.error_message}
+              </pre>
+            )}
+            {detail.graph_error_message && (
+              <pre className="mb-4 overflow-x-auto whitespace-pre-wrap rounded-lg bg-rose-500/10 p-3 font-mono text-xs text-rose-500 ring-1 ring-inset ring-rose-500/25">
+                Knowledge Graph: {detail.graph_error_message}
               </pre>
             )}
 
@@ -493,6 +515,7 @@ interface DocumentRowsProps {
   onExpire: (doc: DocumentSummary) => void;
   onReactivate: (doc: DocumentSummary) => void;
   onReprocess: (doc: DocumentSummary) => void;
+  onGraphBuild: (doc: DocumentSummary) => void;
   onDelete: (doc: DocumentSummary) => void;
 }
 
@@ -529,6 +552,7 @@ function DocumentRows({
   onExpire,
   onReactivate,
   onReprocess,
+  onGraphBuild,
   onDelete,
 }: DocumentRowsProps) {
   if (!docs.length) {
@@ -608,6 +632,11 @@ function DocumentRows({
                 ) : (
                   <StatusBadge status={doc.status} />
                 )}
+                <GraphStatusBadge
+                  status={doc.graph_status}
+                  eligible={doc.graph_eligible}
+                  enabled={doc.graph_build_enabled}
+                />
               </div>
             </div>
 
@@ -625,6 +654,15 @@ function DocumentRows({
               </p>
               <div className="flex flex-wrap gap-2">
                 <ActionButton icon={Eye} label="Xem chi tiết" disabled={pending} onClick={() => onView(doc.id)} />
+                {doc.graph_eligible && (
+                  <ActionButton
+                    icon={Network}
+                    label={doc.graph_status === "ready" ? "Build lại KG" : doc.graph_status === "failed" ? "Retry KG" : doc.graph_status === "building" ? "Đang build KG" : "Build KG"}
+                    disabled={pending || !doc.graph_build_enabled || doc.graph_status === "building" || doc.status !== "indexed"}
+                    spinning={doc.graph_status === "building"}
+                    onClick={() => onGraphBuild(doc)}
+                  />
+                )}
                 {doc.is_active && (
                   <>
                     <ActionButton icon={GitBranch} label="Chọn bản thay thế" disabled={pending} onClick={() => onSupersede(doc)} />

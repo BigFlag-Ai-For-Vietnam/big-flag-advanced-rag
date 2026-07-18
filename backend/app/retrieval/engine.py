@@ -25,7 +25,8 @@ from langgraph.graph import END, START, StateGraph
 from app.config import settings
 from app.retrieval import nodes
 from app.retrieval.tools import query_catalog, query_vector_store
-from app.schemas.playground import Citation
+from app.schemas.playground import Citation, GraphFact
+from app.services import graph_service
 
 logger = logging.getLogger("retrieval.engine")
 
@@ -35,10 +36,11 @@ class EngineState(TypedDict):
     top_k: int
     normalized_question: str
     rewritten_question: str
-    subgoals: list[dict]   # {id, description, query, satisfied, note, evidence: list[chunk-dict]}
+    subgoals: list[dict]   # {id, description, query, satisfied, note, evidence, graph_evidence}
     hops: int
     tool_calls: list[dict]
     citations: list[Citation]
+    graph_facts: list[GraphFact]
 
 
 # ------------------------------------------------------------------ helpers
@@ -78,6 +80,36 @@ def _merge_evidence(existing: list[dict], hits: list[dict]) -> list[dict]:
     return out
 
 
+def _graph_search(query: str, chunk_hits: list[dict]) -> list[dict]:
+    """Baseline relationship-traversal cạnh `_search` (chunk): query CẢ 2 chiến lược
+    - citation_neighbors: quan hệ văn bản-văn bản quanh các title vừa xuất hiện trong chunk hits
+    - concept_matches: bundle giá trị+nguồn theo khái niệm khớp câu query
+    Tắt qua `retrieval_enable_graph` (mặc định false — chỉ bật sau khi graph không rỗng);
+    mọi lỗi Neo4j bị nuốt ở graph_service, không chặn pipeline chunk-based (giống
+    `_catalog_outline`)."""
+    if not settings.retrieval_enable_graph or not graph_service.is_configured():
+        return []
+    titles = []
+    for h in chunk_hits:
+        t = h.get("title")
+        if t and t not in titles:
+            titles.append(t)
+    facts = graph_service.citation_neighbors(titles, settings.retrieval_graph_citation_hops)
+    facts += graph_service.concept_matches(query, settings.retrieval_graph_concept_top_k)
+    return facts[: settings.retrieval_graph_max_facts_per_subgoal]
+
+
+def _merge_graph_evidence(existing: list[dict], facts: list[dict]) -> list[dict]:
+    seen = {f.get("fact_id") for f in existing}
+    out = list(existing)
+    for f in facts:
+        fid = f.get("fact_id")
+        if fid and fid not in seen:
+            out.append(f)
+            seen.add(fid)
+    return out
+
+
 # ------------------------------------------------------------------ nodes
 
 def _normalize_step(state: EngineState) -> dict:
@@ -94,6 +126,7 @@ def _plan_step(state: EngineState) -> dict:
     subgoals = nodes.plan(q, outline)
     for sg in subgoals:
         sg.setdefault("evidence", [])
+        sg.setdefault("graph_evidence", [])
         sg.setdefault("satisfied", False)
         sg.setdefault("note", "")
     return {"subgoals": subgoals, "hops": 0, "tool_calls": []}
@@ -114,6 +147,11 @@ def _gather_step(state: EngineState) -> dict:
         sg["evidence"] = _merge_evidence(sg.get("evidence", []), hits)
         trace.append({"tool": "query_vector_store", "args": {"query": query, "subgoal": sg["id"]}, "hit_count": len(hits)})
 
+        graph_facts = _graph_search(query, hits)
+        sg["graph_evidence"] = _merge_graph_evidence(sg.get("graph_evidence", []), graph_facts)
+        if graph_facts:
+            trace.append({"tool": "query_graph_knowledge", "args": {"query": query, "subgoal": sg["id"]}, "hit_count": len(graph_facts)})
+
     return {"subgoals": subgoals, "hops": hops + 1, "tool_calls": trace}
 
 
@@ -129,7 +167,11 @@ def _route_after_assess(state: EngineState) -> str:
 
 
 def _finalize_step(state: EngineState) -> dict:
-    """Gom bằng chứng giữ coverage: mỗi sub-goal góp top-N theo score, union dedup, sort."""
+    """Gom bằng chứng giữ coverage: mỗi sub-goal góp top-N theo score, union dedup, sort.
+
+    Graph facts đi KÊNH RIÊNG (`graph_facts`), KHÔNG trộn chung với `citations`: citations là
+    trích dẫn nguyên văn (chunk), graph facts là quan hệ/thực thể suy luận được — domain
+    compliance cần phân biệt rõ 2 loại này (xem playground.py::_build_messages)."""
     subgoals = state["subgoals"]
     per = max(2, state["top_k"])  # tối thiểu mỗi sub-goal đóng góp tới `per` đoạn tốt nhất
     picked: dict[str, dict] = {}
@@ -150,11 +192,21 @@ def _finalize_step(state: EngineState) -> dict:
         )
         for e in ordered
     ]
+
+    picked_facts: dict[str, dict] = {}
+    for sg in subgoals:
+        for f in sorted(sg.get("graph_evidence", []), key=lambda f: f.get("score", 0.0), reverse=True):
+            fid = f.get("fact_id")
+            if fid and fid not in picked_facts:
+                picked_facts[fid] = f
+    ordered_facts = sorted(picked_facts.values(), key=lambda f: f.get("score", 0.0), reverse=True)
+    graph_facts = [GraphFact(**f) for f in ordered_facts]
+
     logger.info(
-        "[finalize] sub-goals=%s satisfied=%s citations=%s",
-        len(subgoals), sum(1 for s in subgoals if s.get("satisfied")), len(citations),
+        "[finalize] sub-goals=%s satisfied=%s citations=%s graph_facts=%s",
+        len(subgoals), sum(1 for s in subgoals if s.get("satisfied")), len(citations), len(graph_facts),
     )
-    return {"citations": citations}
+    return {"citations": citations, "graph_facts": graph_facts}
 
 
 # ------------------------------------------------------------------ graph
@@ -195,19 +247,24 @@ def _subgoal_coverage(subgoals: list[dict]) -> list[dict]:
             "satisfied": bool(sg.get("satisfied")),
             "note": sg.get("note", ""),
             "evidence_count": len(sg.get("evidence", [])),
+            "graph_evidence_count": len(sg.get("graph_evidence", [])),
         }
         for sg in subgoals
     ]
 
 
 def retrieve(question: str, top_k: int = 5) -> dict:
-    """Chạy planner–executor–verifier. Trả citations + trace + coverage từng sub-goal."""
+    """Chạy planner–executor–verifier. Trả citations + graph_facts + trace + coverage."""
     result = _get_engine().invoke(
-        {"question": question, "top_k": top_k, "subgoals": [], "hops": 0, "tool_calls": [], "citations": []},
+        {
+            "question": question, "top_k": top_k, "subgoals": [], "hops": 0,
+            "tool_calls": [], "citations": [], "graph_facts": [],
+        },
         config={"recursion_limit": 2 * settings.retrieval_max_hops + 6},
     )
     return {
         "citations": result["citations"],
+        "graph_facts": result["graph_facts"],
         "normalized_question": result["normalized_question"],
         "rewritten_question": result["rewritten_question"],
         "tool_calls": result["tool_calls"],

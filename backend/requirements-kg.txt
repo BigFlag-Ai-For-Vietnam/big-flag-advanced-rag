@@ -1,0 +1,7 @@
+-r requirements.txt
+# Chỉ ingest-time cần (LightRAG + ontology YAML build knowledge graph) — KHÔNG cài vào
+# image retrieval-mcp (query-time chỉ cần driver `neo4j`, đã có sẵn trong requirements.txt).
+# Version pin CHẶT: OntologyValidatingGraphStorage (app/services/kg/graph_storage.py)
+# monkeypatch internal dict của lightrag.kg — API không công khai, gắn chặt version.
+lightrag-hku==1.5.4
+PyYAML==6.0.2

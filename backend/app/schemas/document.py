@@ -1,9 +1,9 @@
 """Pydantic schemas cho documents / pages / chunks."""
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
-from app.models.document import DocumentStatus
+from app.models.document import DocumentStatus, GraphStatus
 
 
 class PageOut(BaseModel):
@@ -37,6 +37,11 @@ class DocumentSummary(BaseModel):
     page_count: int | None = None
     chunk_count: int = 0
     error_message: str | None = None
+    # Knowledge Graph chạy độc lập với vector pipeline.
+    graph_status: GraphStatus = GraphStatus.not_built
+    graph_error_message: str | None = None
+    graph_eligible: bool = False
+    graph_build_enabled: bool = False
     # --- versioning / hiệu lực ---
     doc_no: str | None = None
     version_label: str | None = None
@@ -50,6 +55,11 @@ class DocumentSummary(BaseModel):
     lifecycle: str = "active"
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("graph_status", mode="before")
+    @classmethod
+    def _normalize_graph_status(cls, value):
+        return value or GraphStatus.not_built
 
 
 class DocumentDetail(DocumentSummary):
@@ -102,3 +112,7 @@ class StatusResponse(BaseModel):
     page_count: int | None = None
     chunk_count: int = 0
     error_message: str | None = None
+    graph_status: GraphStatus = GraphStatus.not_built
+    graph_error_message: str | None = None
+    graph_eligible: bool = False
+    graph_build_enabled: bool = False
