@@ -34,6 +34,10 @@ class _FakeMlflow:
         )
         self.expectations = []  # (trace_id, name, value, source)
         self.traces = {}
+        self.trace_tags = []  # (trace_id, key, value)
+
+    def set_trace_tag(self, *, trace_id, key, value):
+        self.trace_tags.append((trace_id, key, value))
 
     def start_span(self, name=None, span_type=None):
         self._counter += 1
@@ -134,3 +138,36 @@ def test_load_dataset_jsonl(tmp_path):
         user_input="Q1", reference="R1", reference_contexts=["c1"],
         synthesizer_name="single_hop_specific_query_synthesizer", persona_name="p1",
     )]
+
+
+def test_run_tags_sample_id_on_trace(monkeypatch, tmp_path):
+    from eval.dataset_upload import sample_id
+
+    monkeypatch.setattr(qa_service, "retrieve", lambda q, top_k: [])
+    monkeypatch.setattr(qa_service, "build_messages", lambda q, citations: [{"role": "user", "content": q}])
+    from app.services import llm_client
+    monkeypatch.setattr(llm_client, "chat", lambda messages, **kw: "trả lời")
+
+    fake = _FakeMlflow()
+    entities_mod = types.ModuleType("mlflow.entities")
+    entities_mod.SpanType = fake.entities.SpanType
+    entities_mod.AssessmentSource = lambda source_type, source_id="default": None
+    assessment_source_mod = types.ModuleType("mlflow.entities.assessment_source")
+    assessment_source_mod.AssessmentSourceType = types.SimpleNamespace(LLM_JUDGE="LLM_JUDGE")
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", entities_mod)
+    monkeypatch.setitem(sys.modules, "mlflow.entities.assessment_source", assessment_source_mod)
+
+    jsonl_path = tmp_path / "silver.jsonl"
+    jsonl_path.write_text(
+        '{"user_input": "Có id sẵn?", "sample_id": "id-tu-dataset", "persona_name": "p1"}\n'
+        '{"user_input": "Thiếu id?", "persona_name": "p2"}\n',
+        encoding="utf-8",
+    )
+
+    run(str(jsonl_path), top_k=5)
+
+    tags = {(k, v) for _tid, k, v in fake.trace_tags if k == "sample_id"}
+    # Dòng 1: giữ nguyên id từ dataset; dòng 2: dẫn xuất deterministic từ identity.
+    assert ("sample_id", "id-tu-dataset") in tags
+    assert ("sample_id", sample_id("Thiếu id?", "p2")) in tags

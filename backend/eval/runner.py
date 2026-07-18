@@ -10,8 +10,12 @@ module này chỉ chịu trách nhiệm tạo trace, không tự chấm điểm 
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("eval.runner")
 
 DEFAULT_TOP_K = 5  # khớp QueryRequest.top_k mặc định của playground
 
@@ -23,6 +27,15 @@ class EvalSample:  # 1 dòng dataset đầu vào (từ golden MLflow hoặc silv
     reference_contexts: list[str] = field(default_factory=list)
     synthesizer_name: str | None = None
     persona_name: str | None = None
+    sample_id: str | None = None  # id deterministic để join giữa các eval run (FR mới)
+
+    def __post_init__(self):
+        # Dataset cũ (chưa có sample_id) vẫn join được: id dẫn xuất được từ identity
+        # (user_input, persona_name) — cùng công thức với dataset_upload.sample_id.
+        if self.sample_id is None:
+            from eval.dataset_upload import sample_id as _sample_id
+
+            self.sample_id = _sample_id(self.user_input, self.persona_name)
 
 
 def _load_jsonl(path: Path) -> list[EvalSample]:
@@ -39,6 +52,7 @@ def _load_jsonl(path: Path) -> list[EvalSample]:
                 reference_contexts=d.get("reference_contexts", []),
                 synthesizer_name=d.get("synthesizer_name"),
                 persona_name=d.get("persona_name"),
+                sample_id=d.get("sample_id"),
             ))
     return samples
 
@@ -56,6 +70,7 @@ def _load_mlflow_dataset(name: str) -> list[EvalSample]:
             reference=expectations.get("expected_response", ""),
             reference_contexts=expectations.get("reference_contexts", []),
             persona_name=inputs.get("persona_name"),
+            sample_id=(record.get("tags") or {}).get("sample_id"),
         ))
     return samples
 
@@ -105,9 +120,15 @@ def run(source: str, *, top_k: int = DEFAULT_TOP_K, technique=None) -> list:
     from mlflow.entities.assessment_source import AssessmentSourceType
 
     samples = load_dataset(source)
+    logger.info("Nạp dataset '%s': %d mẫu.", source, len(samples))
     traces = []
-    for sample in samples:
+    for i, sample in enumerate(samples, 1):
+        started = time.monotonic()
+        logger.info("[%d/%d] Chạy RAG: %s", i, len(samples), sample.user_input[:100])
         trace_id = traced_answer(sample.user_input, top_k, technique=technique)
+        logger.info("[%d/%d] Xong sau %.1fs (trace %s)", i, len(samples), time.monotonic() - started, trace_id)
+        if sample.sample_id:
+            mlflow.set_trace_tag(trace_id=trace_id, key="sample_id", value=sample.sample_id)
         if sample.synthesizer_name:
             mlflow.set_trace_tag(trace_id=trace_id, key="synthesizer_name", value=sample.synthesizer_name)
         if sample.persona_name:

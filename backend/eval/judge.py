@@ -34,7 +34,7 @@ class JudgeBundle:
     run_config: RunConfig
 
 
-def _build_judge_llm():
+def build_judge_llm(*, async_client: bool = False):
     """MỘT điểm duy nhất quyết định mode structured-output.
 
     Kết luận spike T04 (backend/eval/spikes/DECISION-structured-output.md):
@@ -52,9 +52,12 @@ def _build_judge_llm():
         LangchainLLMWrapper(ChatOpenAI(model=judge_model_id(), base_url=settings.fpt_base_url,
                                         api_key=settings.fpt_api_key))
     """
+    # async_client=True cho đường mlflow.genai.scorers.ragas (cmd_judge): metric
+    # collections mới của ragas await llm.agenerate() — InstructorLLM raise TypeError
+    # nếu client sync. Đường generate/TestsetGenerator vẫn dùng sync (mặc định).
     return llm_factory(
         judge_model_id(),
-        client=make_openai_client(),
+        client=make_openai_client(async_client=async_client),
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
@@ -69,7 +72,7 @@ def build_judge() -> JudgeBundle:
     llm/embeddings tường minh ở CẢ construction metric lẫn evaluate(), triệt tiêu fallback
     ngầm gpt-4o-mini của ragas khi llm=None.
     """
-    llm = _build_judge_llm()
+    llm = build_judge_llm()
     embeddings = _build_embeddings()
     metrics = [
         Faithfulness(llm=llm),
