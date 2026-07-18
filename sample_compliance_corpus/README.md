@@ -1,7 +1,14 @@
 # sample_compliance_corpus — bộ văn bản tuân thủ MÔ PHỎNG
 
-Bộ **10 PDF giả lập** (fictional) mô phỏng văn bản tuân thủ ngân hàng, dùng để kiểm thử
+Bộ **51 PDF giả lập** (fictional) mô phỏng văn bản tuân thủ ngân hàng, dùng để kiểm thử
 pipeline RAG + **relationship/entity extraction (Graph)** và làm showcase hackathon.
+
+- **Tài liệu 01–10 (v1):** bộ gốc — đáp án tại [`GROUND_TRUTH.md`](GROUND_TRUTH.md).
+- **Tài liệu 11–51 (v2):** bộ mở rộng tăng **retrieval pressure** (chuỗi 2–4 phiên bản/chủ đề,
+  scope variant, văn bản nhiễu: dự thảo/biên bản/FAQ/thông báo tạm thời/quy trình chi nhánh;
+  evidence 1 câu trả lời trải 4–7 tài liệu) — thiết kế + đáp án tại
+  [`GROUND_TRUTH_V2.md`](GROUND_TRUTH_V2.md) (**ground truth dựng trước, tài liệu sinh sau**).
+  Sinh bằng `_generator/docs_content_v2.py`.
 
 > ⚠️ Ngân hàng "TMCP Đông Đô (DongDoBank)" là **hư cấu**; mọi số hiệu, nội dung, người ký đều
 > **giả lập** — không phải văn bản pháp luật / quy định thật. Mỗi trang có dòng disclaimer đặt ở
@@ -30,7 +37,8 @@ pipeline RAG + **relationship/entity extraction (Graph)** và làm showcase hack
 ## Regenerate
 ```bash
 python3 -m venv venv && ./venv/bin/pip install reportlab
-./venv/bin/python _generator/docs_content.py   # cần font Times New Roman của macOS
+./venv/bin/python _generator/docs_content.py      # 10 tài liệu v1 (cần font Times New Roman macOS)
+./venv/bin/python _generator/docs_content_v2.py   # 41 tài liệu v2 (11–51)
 ```
 Font mặc định trỏ tới `/System/Library/Fonts/Supplemental/Times New Roman*.ttf` (macOS).
 Trên OS khác, đổi `FONT_DIR` trong `_generator/gen_corpus.py` sang một TTF hỗ trợ tiếng Việt
