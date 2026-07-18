@@ -8,6 +8,7 @@ from app.db import init_db
 from app.retrieval.mcp import client as retrieval_client
 from app.routers import catalog, documents, playground
 from app.routers import eval as eval_router
+from app.services import tracing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -30,6 +31,8 @@ app.include_router(eval_router.router)
 @app.on_event("startup")
 async def _startup():
     init_db()
+    # Khởi tạo MLflow tracing một lần (dời network I/O khỏi request đầu tiên; lỗi -> tắt lặng).
+    tracing.configure()
     # Retrieval Engine chạy như service riêng (xem docker-compose.yml, service
     # retrieval-mcp) — backend chỉ nói chuyện với nó qua MCP, giữ 1 session sống
     # suốt vòng đời app thay vì mở/đóng kết nối mỗi request.

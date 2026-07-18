@@ -20,7 +20,7 @@ import pdfplumber
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.services import llm_client, storage_service
+from app.services import llm_client, storage_service, tracing
 
 logger = logging.getLogger("parsing_service")
 
@@ -74,47 +74,73 @@ def parse_pdf(pdf_bytes: bytes, document_id: str | None = None) -> list[dict]:
     document_id: nếu có, lưu ảnh mỗi trang qua storage_service (key images/{id}/page_XXXX.png)
     và trả về key đó làm image_ref; nếu None thì không lưu ảnh.
     """
-    rendered: list[tuple[int, bytes, str | None, str]] = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            png = render_page_png(page)
-            text_layer = (page.extract_text() or "").strip()
-            image_ref = None
-            if document_id:
-                image_ref = storage_service.put_bytes(
-                    f"images/{document_id}/page_{i:04d}.png", png
-                )
-            rendered.append((i, png, image_ref, text_layer))
+    with tracing.span(
+        "parse_pdf",
+        span_type=tracing.PARSER,
+        inputs={"document_id": document_id, "pdf_bytes": len(pdf_bytes)},
+        attributes={"vlm_model": settings.fpt_vlm_model, "max_concurrency": settings.vlm_max_concurrency},
+    ) as root:
+        rendered: list[tuple[int, bytes, str | None, str]] = []
+        with tracing.span("render_pages", span_type=tracing.TASK) as render_span:
+            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                for i, page in enumerate(pdf.pages, start=1):
+                    png = render_page_png(page)
+                    text_layer = (page.extract_text() or "").strip()
+                    image_ref = None
+                    if document_id:
+                        image_ref = storage_service.put_bytes(
+                            f"images/{document_id}/page_{i:04d}.png", png
+                        )
+                    rendered.append((i, png, image_ref, text_layer))
+            tracing.set_outputs(render_span, {"page_count": len(rendered)})
 
-    results: dict[int, dict] = {}
-    max_workers = max(1, settings.vlm_max_concurrency)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        future_map = {
-            pool.submit(_parse_page_image, png): (page_number, image_ref, text_layer)
-            for page_number, png, image_ref, text_layer in rendered
-        }
-        for future in as_completed(future_map):
-            page_number, image_ref, text_layer = future_map[future]
-            vlm_text = future.result()  # đã retry bên trong; fail sẽ raise lên pipeline
-            used_fallback = False
-            parsed = vlm_text
-            if not parsed.strip() and settings.parse_text_fallback and text_layer:
-                # VLM rỗng -> dùng text layer của PDF làm dự phòng
-                parsed = text_layer
-                used_fallback = True
-                logger.warning(
-                    "Trang %s: VLM trả rỗng, dùng text-layer PDF làm dự phòng (%s ký tự).",
-                    page_number,
-                    len(text_layer),
-                )
-            results[page_number] = {
-                "page_number": page_number,
-                "parsed_text": parsed,
-                "image_ref": image_ref,
-                "used_fallback": used_fallback,
-            }
+        results: dict[int, dict] = {}
+        max_workers = max(1, settings.vlm_max_concurrency)
+        with tracing.span(
+            "vlm_parse_pages",
+            span_type=tracing.LLM,
+            attributes={"page_count": len(rendered)},
+        ) as vlm_span:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                future_map = {
+                    pool.submit(_parse_page_image, png): (page_number, image_ref, text_layer)
+                    for page_number, png, image_ref, text_layer in rendered
+                }
+                for future in as_completed(future_map):
+                    page_number, image_ref, text_layer = future_map[future]
+                    vlm_text = future.result()  # đã retry bên trong; fail sẽ raise lên pipeline
+                    used_fallback = False
+                    parsed = vlm_text
+                    if not parsed.strip() and settings.parse_text_fallback and text_layer:
+                        # VLM rỗng -> dùng text layer của PDF làm dự phòng
+                        parsed = text_layer
+                        used_fallback = True
+                        logger.warning(
+                            "Trang %s: VLM trả rỗng, dùng text-layer PDF làm dự phòng (%s ký tự).",
+                            page_number,
+                            len(text_layer),
+                        )
+                    results[page_number] = {
+                        "page_number": page_number,
+                        "parsed_text": parsed,
+                        "image_ref": image_ref,
+                        "used_fallback": used_fallback,
+                    }
+            fallback_pages = sum(1 for r in results.values() if r["used_fallback"])
+            tracing.set_outputs(vlm_span, {"fallback_pages": fallback_pages})
 
-    return [results[k] for k in sorted(results)]
+        pages_out = [results[k] for k in sorted(results)]
+        non_empty = sum(1 for p in pages_out if (p.get("parsed_text") or "").strip())
+        tracing.set_outputs(
+            root,
+            {
+                "page_count": len(pages_out),
+                "non_empty_pages": non_empty,
+                "fallback_pages": sum(1 for p in pages_out if p["used_fallback"]),
+                "total_chars": sum(len(p["parsed_text"] or "") for p in pages_out),
+            },
+        )
+        return pages_out
 
 
 def join_pages(pages: list[dict]) -> str:

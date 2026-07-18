@@ -36,7 +36,7 @@ from app.schemas.playground import (
     QueryResponse,
     SubgoalCoverage,
 )
-from app.services import catalog_service, embedding_service, llm_client, qdrant_service
+from app.services import catalog_service, embedding_service, llm_client, qdrant_service, tracing
 
 router = APIRouter(prefix="/api/playground", tags=["playground"])
 logger = logging.getLogger("playground")
@@ -55,12 +55,23 @@ SYSTEM_PROMPT = (
 async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[SubgoalCoverage]]:
     """Gọi Retrieval Engine (agentic planning) qua MCP → citations + coverage từng sub-goal.
     Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning)."""
-    try:
-        result = await retrieval_client.retrieve(question, top_k)
-        return result.citations, result.subgoals
-    except Exception as exc:  # noqa: BLE001 — MCP down/lỗi -> fallback
-        logger.warning("Retrieval Engine (MCP) lỗi, fallback Qdrant trực tiếp: %s", exc)
-        return _simple_retrieve(question, top_k), []
+    with tracing.span(
+        "retrieve",
+        span_type=tracing.RETRIEVER,
+        inputs={"question": question, "top_k": top_k},
+    ) as span:
+        try:
+            result = await retrieval_client.retrieve(question, top_k)
+            citations, subgoals = result.citations, result.subgoals
+            fallback = False
+        except Exception as exc:  # noqa: BLE001 — MCP down/lỗi -> fallback
+            logger.warning("Retrieval Engine (MCP) lỗi, fallback Qdrant trực tiếp: %s", exc)
+            citations, subgoals, fallback = _simple_retrieve(question, top_k), [], True
+        tracing.set_outputs(
+            span,
+            {"num_citations": len(citations), "num_subgoals": len(subgoals), "fallback": fallback},
+        )
+        return citations, subgoals
 
 
 def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
@@ -140,31 +151,53 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
     if req.stream:
         return StreamingResponse(_stream_query(db, req), media_type="text/event-stream")
 
-    citations, coverage = await _retrieve(req.question, req.top_k)
-    catalogs = _fetch_catalogs(db, citations)
-    answer = llm_client.chat(
-        _build_messages(req.question, citations, catalogs, coverage),
-        temperature=0.2, max_tokens=1024, tag="qa",
-    )
-    return QueryResponse(answer=answer, citations=citations, catalogs=catalogs)
+    with tracing.span(
+        "playground_query",
+        span_type=tracing.CHAIN,
+        inputs={"question": req.question},
+        attributes={"top_k": req.top_k, "stream": False},
+    ) as root:
+        citations, coverage = await _retrieve(req.question, req.top_k)
+        catalogs = _fetch_catalogs(db, citations)
+        with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
+            answer = llm_client.chat(
+                _build_messages(req.question, citations, catalogs, coverage),
+                temperature=0.2, max_tokens=1024, tag="qa",
+            )
+            tracing.set_outputs(gen, {"answer_chars": len(answer)})
+        tracing.set_outputs(
+            root, {"answer_chars": len(answer), "num_citations": len(citations)}
+        )
+        return QueryResponse(answer=answer, citations=citations, catalogs=catalogs)
 
 
 async def _stream_query(db: Session, req: QueryRequest):
     """SSE: gửi catalogs + citations trước, rồi stream token, kết thúc [DONE]."""
-    try:
-        citations, coverage = await _retrieve(req.question, req.top_k)
-        catalogs = _fetch_catalogs(db, citations)
-        yield _sse({"type": "catalogs", "catalogs": [c.model_dump() for c in catalogs]})
-        yield _sse({"type": "citations", "citations": [c.model_dump() for c in citations]})
-        yield _sse({"type": "coverage", "subgoals": [s.model_dump() for s in coverage]})
-        for delta in llm_client.chat_stream(
-            _build_messages(req.question, citations, catalogs, coverage),
-            temperature=0.2, max_tokens=1024, tag="qa_stream",
-        ):
-            yield _sse({"type": "token", "content": delta})
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Stream lỗi")
-        yield _sse({"type": "error", "message": str(exc)})
+    with tracing.span(
+        "playground_query",
+        span_type=tracing.CHAIN,
+        inputs={"question": req.question},
+        attributes={"top_k": req.top_k, "stream": True},
+    ) as root:
+        try:
+            citations, coverage = await _retrieve(req.question, req.top_k)
+            catalogs = _fetch_catalogs(db, citations)
+            yield _sse({"type": "catalogs", "catalogs": [c.model_dump() for c in catalogs]})
+            yield _sse({"type": "citations", "citations": [c.model_dump() for c in citations]})
+            yield _sse({"type": "coverage", "subgoals": [s.model_dump() for s in coverage]})
+            with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
+                token_count = 0
+                for delta in llm_client.chat_stream(
+                    _build_messages(req.question, citations, catalogs, coverage),
+                    temperature=0.2, max_tokens=1024, tag="qa_stream",
+                ):
+                    token_count += 1
+                    yield _sse({"type": "token", "content": delta})
+                tracing.set_outputs(gen, {"token_deltas": token_count})
+            tracing.set_outputs(root, {"num_citations": len(citations)})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Stream lỗi")
+            yield _sse({"type": "error", "message": str(exc)})
     yield "data: [DONE]\n\n"
 
 

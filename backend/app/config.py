@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     # PHẢI override (http://host.docker.internal:5000 hoặc mạng compose chung) — xem FR-13.
     mlflow_tracking_uri: str = "http://localhost:5000"
     mlflow_experiment: str = "advanced-rag-eval"
+    # --- Tracing (MLflow spans cho parsing / embedding / playground) ---
+    # Bật: mỗi bước ghi span vào experiment RIÊNG (tách khỏi experiment eval). Best-effort —
+    # MLflow down chỉ tắt trace, KHÔNG chặn request. Tắt (false) khi chạy offline/không có MLflow.
+    tracing_enabled: bool = True
+    mlflow_trace_experiment: str = "advanced-rag-traces"
     # Rỗng -> fallback fpt_chat_model tại nơi dùng (judge factory trong llm_client, T05).
     # KHÔNG resolve fallback ở đây: giữ "" để nơi dùng biết là chưa override.
     eval_judge_model: str = ""
