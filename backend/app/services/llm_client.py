@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 from openai import AsyncOpenAI, OpenAI
 
@@ -234,6 +234,62 @@ def chat_stream(
                 yield delta.content
     except Exception as exc:  # noqa: BLE001
         raise LLMError(f"chat_stream() lỗi: {exc}") from exc
+
+
+async def chat_stream_async(
+    messages: list[dict],
+    *,
+    model: str | None = None,
+    disable_thinking: bool | None = None,
+    temperature: float = 0.2,
+    max_tokens: int | None = 1024,
+    tag: str = "chat_stream_async",
+) -> AsyncIterator[str]:
+    """Async streaming cho các flow cần chạy nhiều completion song song.
+
+    Giữ cùng model/parameter/fallback với :func:`chat_stream`, nhưng dùng AsyncOpenAI để
+    không block event loop của FastAPI trong lúc chờ token từ provider.
+    """
+    model = model or settings.fpt_chat_model
+    if not model:
+        raise LLMError("FPT_CHAT_MODEL chưa được cấu hình (.env).")
+    if disable_thinking is None:
+        disable_thinking = settings.fpt_disable_thinking
+
+    client = make_openai_client(async_client=True)
+    assert isinstance(client, AsyncOpenAI)
+
+    async def _open_stream(eb):
+        kwargs = dict(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        if eb:
+            kwargs["extra_body"] = eb
+        return await client.chat.completions.create(**kwargs)
+
+    try:
+        try:
+            stream = await _open_stream(_thinking_extra(disable_thinking))
+        except Exception as exc:  # noqa: BLE001
+            if _is_unsupported_param_error(exc):
+                logger.warning("enable_thinking không hỗ trợ (async stream), fallback: %s", exc)
+                stream = await _open_stream(None)
+            else:
+                raise
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
+    except Exception as exc:  # noqa: BLE001
+        raise LLMError(f"chat_stream_async() lỗi [{tag}]: {exc}") from exc
+    finally:
+        await client.close()
 
 
 def vision(image_bytes: bytes, prompt: str, *, model: str | None = None, tag: str = "vision") -> str:

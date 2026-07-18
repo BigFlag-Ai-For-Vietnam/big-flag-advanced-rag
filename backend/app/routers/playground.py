@@ -24,7 +24,6 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models import Document
 from app.retrieval.mcp import client as retrieval_client
 from app.schemas.playground import (
     CatalogInfo,
@@ -36,19 +35,10 @@ from app.schemas.playground import (
     QueryResponse,
     SubgoalCoverage,
 )
-from app.services import catalog_service, embedding_service, llm_client, qdrant_service, tracing
+from app.services import embedding_service, llm_client, qa_service, qdrant_service, tracing
 
 router = APIRouter(prefix="/api/playground", tags=["playground"])
 logger = logging.getLogger("playground")
-
-SYSTEM_PROMPT = (
-    "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
-    "CATALOG là bản đồ mục lục của tài liệu (chỉ tên mục, không có giá trị) — dùng để trả "
-    "lời ĐẦY ĐỦ, đặc biệt câu hỏi liệt kê (đối chiếu catalog xem đã đủ mục chưa). "
-    "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
-    "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
-)
-
 
 # ------------------------- retrieval -------------------------
 
@@ -91,19 +81,7 @@ def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
 
 
 def _fetch_catalogs(db: Session, citations: list[Citation]) -> list[CatalogInfo]:
-    """Lấy catalog document-level (SQLite) cho các tài liệu xuất hiện trong citations."""
-    doc_ids: list[str] = []
-    for c in citations:
-        if c.document_id and c.document_id not in doc_ids:
-            doc_ids.append(c.document_id)
-    out: list[CatalogInfo] = []
-    for did in doc_ids:
-        doc = db.get(Document, did)
-        if settings.retrieval_exclude_inactive and doc and not doc.is_active:
-            continue
-        if doc and doc.catalog and doc.catalog.get("tree"):
-            out.append(CatalogInfo(document_id=doc.id, title=doc.title, catalog=doc.catalog))
-    return out
+    return qa_service.fetch_catalogs(db, citations)
 
 
 # ------------------------- answer -------------------------
@@ -114,27 +92,7 @@ def _build_messages(
     catalogs: list[CatalogInfo],
     subgoals: list[SubgoalCoverage],
 ) -> list[dict]:
-    blocks = [
-        f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
-        for i, c in enumerate(citations)
-    ]
-    context = "\n\n".join(blocks) if blocks else "(không có ngữ cảnh)"
-    catalog_text = "\n\n".join(
-        catalog_service.format_catalog_text(c.title, c.catalog) for c in catalogs
-    ).strip()
-    # Các sub-goal chưa đủ bằng chứng -> yêu cầu LLM nêu rõ phần còn thiếu thay vì bịa.
-    missing = [f"- {s.description}: {s.note or 'chưa đủ bằng chứng'}" for s in subgoals if not s.satisfied]
-
-    parts = [f"NGỮ CẢNH:\n{context}"]
-    if catalog_text:
-        parts.append(f"CATALOG:\n{catalog_text}")
-    if missing:
-        parts.append("PHẦN CÒN THIẾU BẰNG CHỨNG (nêu rõ trong câu trả lời, KHÔNG bịa):\n" + "\n".join(missing))
-    parts.append(f"CÂU HỎI: {question}")
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": "\n\n".join(parts)},
-    ]
+    return qa_service.build_advanced_messages(question, citations, catalogs, subgoals)
 
 
 def _sse(payload: dict) -> str:

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Send, Sparkles, Quote, FileText, Network, Wrench, ListTree, Search, Target, CircleCheck, CircleAlert } from "lucide-react";
+import { Send, Sparkles, Quote, Network, Wrench, ListTree, Search } from "lucide-react";
 import {
   API_BASE_URL,
   mcpRetrieve,
@@ -11,6 +11,7 @@ import {
 } from "../api/client";
 import { cn } from "../lib/cn";
 import CatalogTree from "../components/CatalogTree";
+import { CitationList, CoveragePanel } from "../components/RetrievalEvidence";
 
 const SUGGESTIONS = [
   "Quyền lợi bảo hiểm chính là gì?",
@@ -237,64 +238,6 @@ export default function PlaygroundPage() {
   );
 }
 
-function CitationList({ citations }: { citations: Citation[] }) {
-  return (
-    <div>
-      <p className="mb-2.5 flex items-center gap-2 text-sm font-semibold text-fg">
-        <FileText className="size-4 text-accent" /> Nguồn ({citations.length})
-      </p>
-      <div className="space-y-2.5">
-        {citations.map((c, i) => (
-          <details key={i} className="rounded-xl border bg-surface shadow-sm">
-            <summary className="flex cursor-pointer items-center gap-3 px-4 py-3">
-              <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent-soft font-mono text-xs font-bold text-accent">
-                {i + 1}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-fg">{c.title}</span>
-                <span className="font-mono text-xs text-faint">đoạn #{c.chunk_index}</span>
-              </span>
-              <ScoreBar score={c.score} />
-            </summary>
-            <p className="scrollbar-thin max-h-72 overflow-auto whitespace-pre-wrap border-t px-4 py-3 text-sm leading-relaxed text-muted">
-              {c.final_content}
-            </p>
-          </details>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CoveragePanel({ subgoals }: { subgoals: SubgoalCoverage[] }) {
-  const done = subgoals.filter((s) => s.satisfied).length;
-  return (
-    <div>
-      <p className="mb-2.5 flex items-center gap-2 text-sm font-semibold text-fg">
-        <Target className="size-4 text-accent" /> Độ phủ kế hoạch ({done}/{subgoals.length} sub-goal đủ bằng chứng)
-      </p>
-      <div className="space-y-1.5">
-        {subgoals.map((s, i) => (
-          <div key={i} className="flex items-start gap-2.5 rounded-lg border bg-surface px-3.5 py-2 text-sm">
-            {s.satisfied ? (
-              <CircleCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-            ) : (
-              <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="text-fg">{s.description}</span>
-              <span className="ml-2 font-mono text-xs text-faint">{s.evidence_count} đoạn</span>
-              {!s.satisfied && s.note && (
-                <span className="mt-0.5 block text-xs text-amber-600 dark:text-amber-400">Thiếu: {s.note}</span>
-              )}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function McpPlaygroundPanel() {
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(5);
@@ -457,23 +400,6 @@ function ConfigBadge({ label, on }: { label: string; on: boolean }) {
       )}
     >
       {label}: {on ? "ON" : "OFF"}
-    </span>
-  );
-}
-
-function ScoreBar({ score }: { score: number }) {
-  const pct = Math.max(0, Math.min(100, Math.round(score * 100)));
-  return (
-    <span className="flex shrink-0 items-center gap-2" title={`Relevance ${score.toFixed(3)}`}>
-      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-2">
-        <span
-          className="block h-full rounded-full bg-highlight"
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      <span className="w-9 text-right font-mono text-xs tabular-nums text-highlight">
-        {score.toFixed(2)}
-      </span>
     </span>
   );
 }

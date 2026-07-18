@@ -74,6 +74,21 @@ export interface McpRetrieveResponse {
   config: McpRetrieveConfig;
 }
 
+export type ShowcasePipeline = "advanced" | "raw";
+
+export interface ShowcaseTraceStep {
+  stage: string;
+  label: string;
+  hit_count?: number;
+}
+
+export interface ShowcaseMetrics {
+  retrieval_ms: number | null;
+  first_token_ms: number | null;
+  total_ms: number | null;
+  citation_count: number;
+}
+
 export interface UploadOptions {
   category?: string | null;
   focusEntities?: string[];

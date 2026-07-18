@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
 from app.retrieval.mcp import client as retrieval_client
-from app.routers import catalog, documents, playground
+from app.routers import catalog, documents, playground, showcase
 from app.routers import eval as eval_router
 from app.services import tracing
 
@@ -26,6 +26,7 @@ app.include_router(documents.router)
 app.include_router(playground.router)
 app.include_router(catalog.router)
 app.include_router(eval_router.router)
+app.include_router(showcase.router)
 
 
 @app.on_event("startup")

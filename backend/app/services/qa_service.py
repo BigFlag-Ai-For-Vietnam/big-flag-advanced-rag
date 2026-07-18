@@ -1,11 +1,23 @@
 """Dịch vụ QA dùng chung: retrieval + dựng prompt + gọi answer (router + eval CLI)."""
 from __future__ import annotations
 
-from app.schemas.playground import Citation
-from app.services import embedding_service, llm_client, qdrant_service
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models import Document
+from app.schemas.playground import CatalogInfo, Citation, SubgoalCoverage
+from app.services import catalog_service, embedding_service, llm_client, qdrant_service
 
 SYSTEM_PROMPT = (
     "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
+    "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
+    "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
+)
+
+ADVANCED_SYSTEM_PROMPT = (
+    "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
+    "CATALOG là bản đồ mục lục của tài liệu (chỉ tên mục, không có giá trị) — dùng để trả "
+    "lời ĐẦY ĐỦ, đặc biệt câu hỏi liệt kê (đối chiếu catalog xem đã đủ mục chưa). "
     "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
     "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
 )
@@ -35,6 +47,61 @@ def build_messages(question: str, citations: list[Citation]) -> list[dict]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"NGỮ CẢNH:\n{context}\n\nCÂU HỎI: {question}"},
+    ]
+
+
+def fetch_catalogs(db: Session, citations: list[Citation]) -> list[CatalogInfo]:
+    """Lấy catalog document-level cho các document xuất hiện trong citations."""
+    doc_ids: list[str] = []
+    for citation in citations:
+        if citation.document_id and citation.document_id not in doc_ids:
+            doc_ids.append(citation.document_id)
+
+    result: list[CatalogInfo] = []
+    for document_id in doc_ids:
+        document = db.get(Document, document_id)
+        if settings.retrieval_exclude_inactive and document and not document.is_active:
+            continue
+        if document and document.catalog and document.catalog.get("tree"):
+            result.append(
+                CatalogInfo(document_id=document.id, title=document.title, catalog=document.catalog)
+            )
+    return result
+
+
+def build_advanced_messages(
+    question: str,
+    citations: list[Citation],
+    catalogs: list[CatalogInfo],
+    subgoals: list[SubgoalCoverage],
+) -> list[dict]:
+    """Prompt answer của pipeline advanced: evidence + catalog + coverage còn thiếu."""
+    blocks = [
+        f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
+        for i, c in enumerate(citations)
+    ]
+    context = "\n\n".join(blocks) if blocks else "(không có ngữ cảnh)"
+    catalog_text = "\n\n".join(
+        catalog_service.format_catalog_text(c.title, c.catalog) for c in catalogs
+    ).strip()
+    missing = [
+        f"- {s.description}: {s.note or 'chưa đủ bằng chứng'}"
+        for s in subgoals
+        if not s.satisfied
+    ]
+
+    parts = [f"NGỮ CẢNH:\n{context}"]
+    if catalog_text:
+        parts.append(f"CATALOG:\n{catalog_text}")
+    if missing:
+        parts.append(
+            "PHẦN CÒN THIẾU BẰNG CHỨNG (nêu rõ trong câu trả lời, KHÔNG bịa):\n"
+            + "\n".join(missing)
+        )
+    parts.append(f"CÂU HỎI: {question}")
+    return [
+        {"role": "system", "content": ADVANCED_SYSTEM_PROMPT},
+        {"role": "user", "content": "\n\n".join(parts)},
     ]
 
 
