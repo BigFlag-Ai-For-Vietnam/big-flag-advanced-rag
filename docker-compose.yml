@@ -1,16 +1,9 @@
-services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      # Runtime storage = named volume (nhanh, tránh rủi ro mmap khi bind mount trên Windows).
-      # Data đi theo git bằng SNAPSHOT (thư mục qdrant_snapshots/) — xem scripts/qdrant_*.
-      - qdrant_data:/qdrant/storage
-      # mount thư mục snapshot của repo vào container để tạo/khôi phục snapshot qua API
-      - ./qdrant_snapshots:/qdrant/snapshots
+# App stack: backend + frontend.
+# Qdrant (cùng MLflow/RustFS/Postgres) nằm ở stack infra/ — chạy `make infra-up-d`
+# (hoặc `cd infra && docker compose up -d`) TRƯỚC, vì backend nối vào network
+# "rag-infra" của stack đó để gọi qdrant/mlflow theo service name.
 
+services:
   backend:
     build: ./backend
     ports:
@@ -23,12 +16,16 @@ services:
       DB_URL: sqlite:////data/rag.db
       DATA_DIR: /data
       RETRIEVAL_MCP_URL: http://retrieval-mcp:8100/mcp
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       # bind mount: db + PDF gốc + ảnh page nằm trực tiếp trong ./backend/data trên host
       - ./backend/data:/data
     depends_on:
       - qdrant
       - retrieval-mcp
+    networks:
+      - default
+      - infra
 
   retrieval-mcp:
     build:
@@ -60,5 +57,8 @@ services:
     depends_on:
       - backend
 
-volumes:
-  qdrant_data:
+networks:
+  # Network của stack infra/ (docker compose ở đó tạo ra); phải tồn tại trước khi up.
+  infra:
+    external: true
+    name: rag-infra

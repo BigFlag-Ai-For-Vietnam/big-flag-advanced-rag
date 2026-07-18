@@ -45,9 +45,12 @@ Core frameworks/systems only; versions are pinned in `requirements.txt` / `packa
 
 ```bash
 # Full stack (recommended) — needs .env with FPT_API_KEY + model IDs
-cp .env.example .env
-docker compose up --build
-# Qdrant dashboard: :6333/dashboard | Backend Swagger: :8000/docs | Frontend: :5173
+make env   # creates .env + infra/.env from the examples
+make up    # starts infra/ (Qdrant + MLflow + RustFS + Postgres) detached, then backend + frontend
+# The app compose has NO qdrant service: backend joins the infra stack's attachable
+# `rag-infra` network and reaches qdrant:6333 / mlflow:5000 by service name,
+# so the infra stack must be up first (make up handles the ordering).
+# Qdrant dashboard: :6333/dashboard | Backend Swagger: :8000/docs | Frontend: :5173 | MLflow: :5000
 
 # Backend local
 cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
@@ -57,8 +60,8 @@ cd backend && pytest                                              # offline unit
 cd frontend && npm install && npm run dev
 cd frontend && npm run build   # tsc -b && vite build (also the typecheck)
 
-# Infra stack (MLflow + RustFS + Postgres) — separate compose
-cd infra && cp .env.example .env && docker compose up --build
+# Infra stack (Qdrant + MLflow + RustFS + Postgres) — separate compose in infra/
+cd infra && cp .env.example .env && docker compose up --build   # or: make infra-up
 ```
 
 ## Project structure
@@ -81,8 +84,9 @@ backend/app/
 frontend/src/
   api/client.ts        backend client
   pages/               Upload, Documents, Playground
-infra/                 MLflow + RustFS + Postgres compose. MLflow uses RustFS for artifacts;
-                       the app can optionally reuse RustFS for document blobs (STORAGE_BACKEND=s3).
+infra/                 Qdrant + MLflow + RustFS + Postgres compose (network `rag-infra`, attachable).
+                       MLflow uses RustFS for artifacts; the app can optionally reuse RustFS for
+                       document blobs (STORAGE_BACKEND=s3).
 ```
 
 ## Load-bearing config (read before touching model calls)
@@ -92,7 +96,7 @@ Model IDs and vector dimension come from `.env` via `config.py`. Two settings br
 - **`EMBED_DIM`** must match the embedding model's output dimension, or Qdrant upsert fails (collection is created once at this size; changing it later means recreating the collection).
 - **`FPT_VLM_MODEL`** must be a genuine **vision** model (accepts `image_url`); a chat-only model silently returns empty text. `PARSE_TEXT_FALLBACK=true` falls back to the PDF text layer when the VLM returns empty.
 - **`FPT_ENABLE_PROMPT_CACHE`** — keep `false`; FPT hasn't confirmed `cache_control` support.
-- **`STORAGE_BACKEND`** — `local` (default; blobs on disk under `DATA_DIR`, Docker volume `backend_data`) or `s3` (RustFS / any S3-compatible endpoint). `s3` needs `S3_ENDPOINT_URL` + keys + `S3_BUCKET` reachable — RustFS runs in `infra/` on `:9000` (`http://rustfs:9000` inside a shared compose network). The app bucket (`rag-documents`) is deliberately separate from MLflow's `mlflow` bucket. The compose files are independent by default, so `s3` mode requires you to make RustFS reachable from the backend (shared network / external endpoint).
+- **`STORAGE_BACKEND`** — `local` (default; blobs on disk under `DATA_DIR`) or `s3` (RustFS / any S3-compatible endpoint). `s3` needs `S3_ENDPOINT_URL` + keys + `S3_BUCKET` reachable — RustFS runs in `infra/` on `:9000`. The dockerized backend already joins the infra stack's `rag-infra` network, so use `http://rustfs:9000` there (`http://localhost:9000` for a host-local backend). The app bucket (`rag-documents`) is deliberately separate from MLflow's `mlflow` bucket.
 
 ## Key invariants
 
