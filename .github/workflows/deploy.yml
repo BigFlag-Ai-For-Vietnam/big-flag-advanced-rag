@@ -10,6 +10,7 @@ on:
       - "backend/**"
       - "frontend/**"
       - "docker-compose.yml"
+      - "docker-compose.prod.yml"
       - "infra/**"
       - "scripts/deploy.sh"
       - ".github/workflows/deploy.yml"
