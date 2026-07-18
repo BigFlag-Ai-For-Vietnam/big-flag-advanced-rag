@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
-import { Send, Sparkles, Quote, FileText, Network, Wrench, ListTree, Search } from "lucide-react";
+import { Send, Sparkles, Quote, FileText, Network, Wrench, ListTree, Search, Target, CircleCheck, CircleAlert } from "lucide-react";
 import {
   API_BASE_URL,
   mcpRetrieve,
   type CatalogInfo,
   type Citation,
   type McpRetrieveConfig,
+  type SubgoalCoverage,
   type ToolCallTrace,
 } from "../api/client";
 import { cn } from "../lib/cn";
@@ -24,6 +25,7 @@ export default function PlaygroundPage() {
   const [answer, setAnswer] = useState("");
   const [citations, setCitations] = useState<Citation[]>([]);
   const [catalogs, setCatalogs] = useState<CatalogInfo[]>([]);
+  const [coverage, setCoverage] = useState<SubgoalCoverage[]>([]);
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export default function PlaygroundPage() {
     setAnswer("");
     setCitations([]);
     setCatalogs([]);
+    setCoverage([]);
     setError(null);
     streaming.current = true;
 
@@ -66,6 +69,7 @@ export default function PlaygroundPage() {
             const evt = JSON.parse(data);
             if (evt.type === "citations") setCitations(evt.citations);
             else if (evt.type === "catalogs") setCatalogs(evt.catalogs);
+            else if (evt.type === "coverage") setCoverage(evt.subgoals);
             else if (evt.type === "token") setAnswer((p) => p + evt.content);
             else if (evt.type === "error") setError(evt.message);
           } catch {
@@ -196,6 +200,9 @@ export default function PlaygroundPage() {
             )}
           </div>
 
+          {/* Coverage (agentic planning: mỗi sub-goal đã đủ bằng chứng chưa) */}
+          {coverage.length > 0 && <CoveragePanel subgoals={coverage} />}
+
           {/* Catalog (bản đồ mục lục agent dùng để đánh giá độ đầy đủ) */}
           {catalogs.length > 0 && (
             <div>
@@ -259,6 +266,35 @@ function CitationList({ citations }: { citations: Citation[] }) {
   );
 }
 
+function CoveragePanel({ subgoals }: { subgoals: SubgoalCoverage[] }) {
+  const done = subgoals.filter((s) => s.satisfied).length;
+  return (
+    <div>
+      <p className="mb-2.5 flex items-center gap-2 text-sm font-semibold text-fg">
+        <Target className="size-4 text-accent" /> Độ phủ kế hoạch ({done}/{subgoals.length} sub-goal đủ bằng chứng)
+      </p>
+      <div className="space-y-1.5">
+        {subgoals.map((s, i) => (
+          <div key={i} className="flex items-start gap-2.5 rounded-lg border bg-surface px-3.5 py-2 text-sm">
+            {s.satisfied ? (
+              <CircleCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+            ) : (
+              <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="text-fg">{s.description}</span>
+              <span className="ml-2 font-mono text-xs text-faint">{s.evidence_count} đoạn</span>
+              {!s.satisfied && s.note && (
+                <span className="mt-0.5 block text-xs text-amber-600 dark:text-amber-400">Thiếu: {s.note}</span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function McpPlaygroundPanel() {
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(5);
@@ -266,6 +302,7 @@ function McpPlaygroundPanel() {
   const [normalizedQuestion, setNormalizedQuestion] = useState("");
   const [rewrittenQuestion, setRewrittenQuestion] = useState("");
   const [toolCalls, setToolCalls] = useState<ToolCallTrace[]>([]);
+  const [subgoals, setSubgoals] = useState<SubgoalCoverage[]>([]);
   const [config, setConfig] = useState<McpRetrieveConfig | null>(null);
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState<string | null>(null);
@@ -279,12 +316,14 @@ function McpPlaygroundPanel() {
     setError(null);
     setCitations([]);
     setToolCalls([]);
+    setSubgoals([]);
     try {
       const res = await mcpRetrieve(q, topK);
       setCitations(res.citations);
       setNormalizedQuestion(res.normalized_question);
       setRewrittenQuestion(res.rewritten_question);
       setToolCalls(res.tool_calls);
+      setSubgoals(res.subgoals);
       setConfig(res.config);
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || String(e));
@@ -384,6 +423,8 @@ function McpPlaygroundPanel() {
                   </div>
                 )}
               </div>
+
+              {subgoals.length > 0 && <CoveragePanel subgoals={subgoals} />}
 
               {citations.length > 0 ? (
                 <CitationList citations={citations} />

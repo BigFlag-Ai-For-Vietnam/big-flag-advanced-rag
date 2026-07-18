@@ -67,6 +67,26 @@ class Settings(BaseSettings):
     retrieval_enable_rewrite: bool = True
     retrieval_enable_rerank: bool = True
 
+    # --- Agentic planning (plan -> gather -> assess -> loop) ---
+    # Bật planning: tách câu hỏi thành sub-goal, retrieve từng cái, kiểm tra coverage, lặp
+    # tới khi đủ hoặc hết budget. Tắt -> 1 sub-goal = cả câu hỏi (retrieve 1 lần, không loop).
+    retrieval_enable_planning: bool = True
+    # Budget: số vòng gather->assess tối đa (mỗi vòng broaden các sub-goal còn thiếu).
+    retrieval_max_hops: int = 3
+    # Số chunk lấy cho mỗi sub-goal mỗi vòng gather.
+    retrieval_per_subgoal_k: int = 4
+    # Chặn số sub-goal do planner sinh ra (tránh nổ số lần gọi retrieve).
+    retrieval_plan_max_subgoals: int = 6
+    # Điểm tối thiểu để coi 1 chunk là bằng chứng (fallback heuristic khi assess LLM lỗi).
+    retrieval_coverage_min_score: float = 0.35
+
+    # --- Hybrid retrieval (dense Qdrant + sparse BM25, fuse RRF-lite) ---
+    # Bật: mỗi lần search = dense (vector) + BM25 (keyword) rồi hợp nhất → vá ca tra
+    # bảng/số/keyword mà dense yếu. Tắt -> dense-only như cũ.
+    retrieval_enable_hybrid: bool = True
+    # Trọng số dense khi fuse (0..1); phần còn lại (1-alpha) cho BM25.
+    retrieval_hybrid_alpha: float = 0.5
+
 
 @lru_cache
 def get_settings() -> Settings:

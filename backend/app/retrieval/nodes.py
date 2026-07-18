@@ -59,6 +59,139 @@ def rewrite(question: str) -> str:
     return result
 
 
+PLAN_PROMPT = (
+    "Bạn là bộ LẬP KẾ HOẠCH truy hồi cho hệ thống hỏi–đáp tài liệu ngân hàng/bảo hiểm. "
+    "Tách câu hỏi thành các SUB-GOAL cụ thể — mỗi sub-goal là một mẩu thông tin độc lập cần "
+    "tìm để trả lời ĐẦY ĐỦ. Nguyên tắc: mỗi THỰC THỂ/sản phẩm × mỗi KHÍA CẠNH là 1 sub-goal "
+    "riêng.\n"
+    "Ví dụ:\n"
+    "- 'So sánh quyền lợi bảo hiểm A và B' -> 2 sub-goal: 'quyền lợi bảo hiểm A', 'quyền lợi "
+    "bảo hiểm B'.\n"
+    "- 'Điều kiện loại trừ của bảo hiểm A và mức phí của nó' -> 2 sub-goal: 'điều kiện loại "
+    "trừ bảo hiểm A', 'mức phí bảo hiểm A'.\n"
+    "Nếu có CATALOG (mục lục tài liệu), dùng nó để tách cho đúng và đủ mục. Câu hỏi đơn (1 "
+    "thực thể, 1 khía cạnh) thì chỉ cần 1 sub-goal. Mỗi sub-goal gồm: description (mục tiêu "
+    "ngắn) + query (câu truy vấn tiếng Việt rõ ràng để search KB).\n"
+    "CHỈ trả về JSON đúng schema, không giải thích: "
+    '{"subgoals":[{"description":"...","query":"..."}]}'
+)
+
+ASSESS_PROMPT = (
+    "Bạn là bộ KIỂM TRA ĐỘ ĐẦY ĐỦ bằng chứng cho retrieval. Với mỗi SUB-GOAL và các đoạn "
+    "bằng chứng tìm được, quyết định có nên TÌM THÊM không.\n"
+    "- satisfied=true nếu các đoạn ĐÃ CHỨA thông tin để trả lời phần lớn sub-goal (không cần "
+    "hoàn hảo, không cần mọi chi tiết) — kể cả khi thông tin nằm trong bảng/con số.\n"
+    "- satisfied=false CHỈ khi các đoạn hầu như KHÔNG liên quan hoặc thiếu hẳn thông tin cốt "
+    "lõi. Khi false, note nêu ngắn gọn còn thiếu gì để lần tìm sau nhắm đúng.\n"
+    "Ưu tiên dừng (true) khi đã đủ dùng — tránh tìm lặp vô ích.\n"
+    "CHỈ trả về JSON đúng schema, không giải thích: "
+    '{"results":[{"id":"<id>","satisfied":true,"note":"..."}]}'
+)
+
+
+def _parse_json_obj(raw: str) -> dict:
+    """Parse JSON object từ output LLM (bỏ code fence, tìm object đầu tiên)."""
+    text = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return {}
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return {}
+
+
+def plan(question: str, catalog_outline: str = "") -> list[dict]:
+    """Tách câu hỏi thành sub-goal. Tắt planning -> 1 sub-goal = cả câu hỏi.
+
+    Trả về list [{id, description, query}]. Robust: lỗi/rỗng -> fallback 1 sub-goal.
+    """
+    single = [{"id": "g1", "description": question, "query": question}]
+    if not settings.retrieval_enable_planning:
+        logger.info("[plan] tắt (RETRIEVAL_ENABLE_PLANNING=false) — 1 sub-goal = cả câu hỏi")
+        return single
+
+    user = f"CÂU HỎI: {question}"
+    if catalog_outline.strip():
+        user += f"\n\nCATALOG (mục lục tài liệu liên quan):\n{catalog_outline}"
+    user += f"\n\nTách tối đa {settings.retrieval_plan_max_subgoals} sub-goal."
+    try:
+        raw = llm_client.chat(
+            [{"role": "system", "content": PLAN_PROMPT}, {"role": "user", "content": user}],
+            temperature=0.0, max_tokens=600, tag="retrieval_plan",
+        )
+        items = _parse_json_obj(raw).get("subgoals", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[plan] lỗi, fallback 1 sub-goal: %s", exc)
+        return single
+
+    subgoals: list[dict] = []
+    for i, it in enumerate(items[: settings.retrieval_plan_max_subgoals]):
+        if not isinstance(it, dict):
+            continue
+        desc = str(it.get("description", "")).strip()
+        query = str(it.get("query", "")).strip() or desc
+        if not query:
+            continue
+        subgoals.append({"id": f"g{i + 1}", "description": desc or query, "query": query})
+    if not subgoals:
+        return single
+    logger.info("[plan] %s sub-goal: %s", len(subgoals), [s["query"] for s in subgoals])
+    return subgoals
+
+
+def _evidence_snippet(chunk: dict, limit: int = 500) -> str:
+    txt = (chunk.get("final_content") or "").strip().replace("\n", " ")
+    return txt[:limit]
+
+
+def assess(subgoals: list[dict]) -> list[dict]:
+    """Đánh giá mỗi sub-goal đã đủ bằng chứng chưa (LLM judge, 1 call).
+
+    Cập nhật tại chỗ 'satisfied' + 'note' cho từng sub-goal. Lỗi -> heuristic theo score.
+    """
+    def _heuristic():
+        for sg in subgoals:
+            strong = any(
+                (e.get("score", 0.0) >= settings.retrieval_coverage_min_score)
+                for e in sg.get("evidence", [])
+            )
+            sg["satisfied"] = bool(strong)
+            sg["note"] = "" if strong else "Chưa có đoạn đủ liên quan."
+        return subgoals
+
+    blocks = []
+    for sg in subgoals:
+        ev = sg.get("evidence", [])[:6]
+        ev_txt = "\n".join(f"  - {_evidence_snippet(e)}" for e in ev) or "  (chưa có bằng chứng)"
+        blocks.append(f"[{sg['id']}] {sg['description']}\nBằng chứng:\n{ev_txt}")
+    user = "\n\n".join(blocks)
+    try:
+        raw = llm_client.chat(
+            [{"role": "system", "content": ASSESS_PROMPT}, {"role": "user", "content": user}],
+            temperature=0.0, max_tokens=500, tag="retrieval_assess",
+        )
+        results = {str(r.get("id")): r for r in _parse_json_obj(raw).get("results", []) if isinstance(r, dict)}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[assess] lỗi, fallback heuristic theo score: %s", exc)
+        return _heuristic()
+
+    for sg in subgoals:
+        r = results.get(sg["id"])
+        if r is None:
+            sg["satisfied"] = bool(sg.get("evidence"))
+            sg["note"] = "" if sg.get("evidence") else "Không có bằng chứng."
+        else:
+            sg["satisfied"] = bool(r.get("satisfied"))
+            sg["note"] = str(r.get("note", "")).strip()
+    logger.info("[assess] coverage=%s", {sg["id"]: sg["satisfied"] for sg in subgoals})
+    return subgoals
+
+
 def _parse_tool_message(msg: ToolMessage) -> list[dict]:
     content = msg.content
     if not isinstance(content, str):

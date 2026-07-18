@@ -48,11 +48,15 @@ export interface McpRetrieveConfig {
 export interface ToolCallTrace {
   tool: string; args: Record<string, unknown>; hit_count: number;
 }
+export interface SubgoalCoverage {
+  description: string; query: string; satisfied: boolean; note: string; evidence_count: number;
+}
 export interface McpRetrieveResponse {
   citations: Citation[];
   normalized_question: string;
   rewritten_question: string;
   tool_calls: ToolCallTrace[];
+  subgoals: SubgoalCoverage[];
   config: McpRetrieveConfig;
 }
 

@@ -34,6 +34,7 @@ from app.schemas.playground import (
     McpRetrieveResponse,
     QueryRequest,
     QueryResponse,
+    SubgoalCoverage,
 )
 from app.services import catalog_service, embedding_service, llm_client, qdrant_service
 
@@ -51,14 +52,15 @@ SYSTEM_PROMPT = (
 
 # ------------------------- retrieval -------------------------
 
-async def _retrieve(question: str, top_k: int) -> list[Citation]:
-    """Gọi Retrieval Engine qua MCP. Nếu lỗi -> fallback retrieve thẳng Qdrant."""
+async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[SubgoalCoverage]]:
+    """Gọi Retrieval Engine (agentic planning) qua MCP → citations + coverage từng sub-goal.
+    Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning)."""
     try:
         result = await retrieval_client.retrieve(question, top_k)
-        return result.citations
+        return result.citations, result.subgoals
     except Exception as exc:  # noqa: BLE001 — MCP down/lỗi -> fallback
         logger.warning("Retrieval Engine (MCP) lỗi, fallback Qdrant trực tiếp: %s", exc)
-        return _simple_retrieve(question, top_k)
+        return _simple_retrieve(question, top_k), []
 
 
 def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
@@ -91,7 +93,12 @@ def _fetch_catalogs(db: Session, citations: list[Citation]) -> list[CatalogInfo]
 
 # ------------------------- answer -------------------------
 
-def _build_messages(question: str, citations: list[Citation], catalogs: list[CatalogInfo]) -> list[dict]:
+def _build_messages(
+    question: str,
+    citations: list[Citation],
+    catalogs: list[CatalogInfo],
+    subgoals: list[SubgoalCoverage],
+) -> list[dict]:
     blocks = [
         f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
         for i, c in enumerate(citations)
@@ -100,10 +107,14 @@ def _build_messages(question: str, citations: list[Citation], catalogs: list[Cat
     catalog_text = "\n\n".join(
         catalog_service.format_catalog_text(c.title, c.catalog) for c in catalogs
     ).strip()
+    # Các sub-goal chưa đủ bằng chứng -> yêu cầu LLM nêu rõ phần còn thiếu thay vì bịa.
+    missing = [f"- {s.description}: {s.note or 'chưa đủ bằng chứng'}" for s in subgoals if not s.satisfied]
 
     parts = [f"NGỮ CẢNH:\n{context}"]
     if catalog_text:
         parts.append(f"CATALOG:\n{catalog_text}")
+    if missing:
+        parts.append("PHẦN CÒN THIẾU BẰNG CHỨNG (nêu rõ trong câu trả lời, KHÔNG bịa):\n" + "\n".join(missing))
     parts.append(f"CÂU HỎI: {question}")
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -125,10 +136,10 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
     if req.stream:
         return StreamingResponse(_stream_query(db, req), media_type="text/event-stream")
 
-    citations = await _retrieve(req.question, req.top_k)
+    citations, coverage = await _retrieve(req.question, req.top_k)
     catalogs = _fetch_catalogs(db, citations)
     answer = llm_client.chat(
-        _build_messages(req.question, citations, catalogs),
+        _build_messages(req.question, citations, catalogs, coverage),
         temperature=0.2, max_tokens=1024, tag="qa",
     )
     return QueryResponse(answer=answer, citations=citations, catalogs=catalogs)
@@ -137,12 +148,13 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
 async def _stream_query(db: Session, req: QueryRequest):
     """SSE: gửi catalogs + citations trước, rồi stream token, kết thúc [DONE]."""
     try:
-        citations = await _retrieve(req.question, req.top_k)
+        citations, coverage = await _retrieve(req.question, req.top_k)
         catalogs = _fetch_catalogs(db, citations)
         yield _sse({"type": "catalogs", "catalogs": [c.model_dump() for c in catalogs]})
         yield _sse({"type": "citations", "citations": [c.model_dump() for c in citations]})
+        yield _sse({"type": "coverage", "subgoals": [s.model_dump() for s in coverage]})
         for delta in llm_client.chat_stream(
-            _build_messages(req.question, citations, catalogs),
+            _build_messages(req.question, citations, catalogs, coverage),
             temperature=0.2, max_tokens=1024, tag="qa_stream",
         ):
             yield _sse({"type": "token", "content": delta})
@@ -169,5 +181,6 @@ async def mcp_retrieve(req: McpRetrieveRequest):
         normalized_question=result.normalized_question,
         rewritten_question=result.rewritten_question,
         tool_calls=result.tool_calls,
+        subgoals=result.subgoals,
         config=config,
     )

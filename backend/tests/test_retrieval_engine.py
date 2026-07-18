@@ -1,106 +1,121 @@
-"""Test outer graph engine: normalize -> rewrite -> react subgraph -> rerank.
+"""Test outer graph (agentic planning): normalize -> rewrite -> plan -> gather -> assess -> loop.
 
-Không gọi FPT thật — tiêm fake BaseChatModel vào engine.build_graph(model=...), chỉ
-mock embedding_service/qdrant_service (dùng thật bởi tool query_vector_store).
+Không gọi FPT thật: mock llm_client.chat (plan/assess) + engine._search / engine._catalog_outline.
 """
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.messages.tool import ToolCall
-from langchain_core.outputs import ChatGeneration, ChatResult
-
 from app.config import settings
-from app.retrieval import engine
-from app.services import embedding_service, qdrant_service
+from app.retrieval import engine, nodes
 
 
-def _make_fake_model(responses: list[AIMessage]) -> BaseChatModel:
-    """Model giả trả lần lượt các AIMessage đã định sẵn (lặp lại cái cuối nếu gọi quá số lượng)."""
-    state = {"i": 0}
-
-    class _Fake(BaseChatModel):
-        @property
-        def _llm_type(self) -> str:
-            return "fake"
-
-        def bind_tools(self, tools, *, tool_choice=None, **kwargs):
-            return self.bind(tools=tools)
-
-        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-            idx = min(state["i"], len(responses) - 1)
-            state["i"] += 1
-            return ChatResult(generations=[ChatGeneration(message=responses[idx])])
-
-    return _Fake()
+def _chunk(cid, doc, idx, score, content, title="Doc"):
+    return {"chunk_id": cid, "document_id": doc, "title": title, "chunk_index": idx, "score": score, "final_content": content}
 
 
-def _mock_vector_store(monkeypatch):
-    monkeypatch.setattr(embedding_service, "embed_query", lambda text: [0.1])
-    monkeypatch.setattr(
-        qdrant_service,
-        "search",
-        lambda vector, top_k: [
-            {
-                "id": "p1",
-                "score": 0.8,
-                "payload": {
-                    "chunk_id": "c1",
-                    "document_id": "d1",
-                    "title": "Thẻ tín dụng Sung Túc",
-                    "chunk_index": 0,
-                    "final_content": "Phí thường niên 500.000đ.",
-                },
-            }
-        ],
-    )
-
-
-def test_engine_runs_normalize_rewrite_react_rerank_in_order(monkeypatch):
+def _mock_common(monkeypatch):
     monkeypatch.setattr(settings, "retrieval_enable_normalize", True)
-    monkeypatch.setattr(settings, "retrieval_enable_rewrite", False)  # đã test riêng ở test_retrieval_nodes.py
-    monkeypatch.setattr(settings, "retrieval_enable_rerank", True)
-    monkeypatch.setattr(settings, "retrieval_agent_max_steps", 10)
-    _mock_vector_store(monkeypatch)
+    monkeypatch.setattr(settings, "retrieval_enable_rewrite", False)  # passthrough, khỏi mock rewrite
+    monkeypatch.setattr(settings, "retrieval_enable_planning", True)
+    monkeypatch.setattr(settings, "retrieval_max_hops", 3)
+    monkeypatch.setattr(engine, "_catalog_outline", lambda q, k: "")
 
-    fake_model = _make_fake_model(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[ToolCall(name="query_vector_store", args={"query": "phí thường niên", "top_k": 3}, id="tc1", type="tool_call")],
-            ),
-            AIMessage(content="đã tìm xong", tool_calls=[]),
-        ]
+
+def test_planning_decomposes_and_covers_each_subgoal(monkeypatch):
+    _mock_common(monkeypatch)
+
+    def fake_chat(messages, **kw):
+        tag = kw.get("tag")
+        if tag == "retrieval_plan":
+            return '{"subgoals":[{"description":"quyền lợi A","query":"quyền lợi bảo hiểm A"},{"description":"quyền lợi B","query":"quyền lợi bảo hiểm B"}]}'
+        if tag == "retrieval_assess":
+            return '{"results":[{"id":"g1","satisfied":true},{"id":"g2","satisfied":true}]}'
+        return ""
+
+    monkeypatch.setattr(nodes.llm_client, "chat", fake_chat)
+    # mỗi sub-goal query khác nhau -> trả chunk khác nhau (giữ coverage cả 2)
+    def fake_search(query, k):
+        if "A" in query:
+            return [_chunk("cA", "dA", 0, 0.8, "Quyền lợi A: ...", "Bảo hiểm A")]
+        return [_chunk("cB", "dB", 0, 0.7, "Quyền lợi B: ...", "Bảo hiểm B")]
+
+    monkeypatch.setattr(engine, "_search", fake_search)
+
+    out = engine.build_graph().invoke(
+        {"question": "So sánh quyền lợi bảo hiểm A và B", "top_k": 5, "subgoals": [], "hops": 0, "tool_calls": [], "citations": []},
+        config={"recursion_limit": 20},
     )
-
-    graph = engine.build_graph(model=fake_model)
-    result = graph.invoke({"question": "  phí   thường niên  ", "top_k": 3, "messages": []})
-
-    assert result["normalized_question"] == "phí thường niên"
-    assert result["rewritten_question"] == "phí thường niên"  # rewrite tắt -> passthrough
-    assert len(result["citations"]) == 1
-    assert result["citations"][0].final_content == "Phí thường niên 500.000đ."
-    assert result["citations"][0].document_id == "d1"
+    docs = {c.document_id for c in out["citations"]}
+    assert docs == {"dA", "dB"}                     # coverage: cả 2 sản phẩm đều có citation
+    assert len(out["subgoals"]) == 2
+    assert all(sg["satisfied"] for sg in _cov(out))
 
 
-def test_engine_stops_gracefully_without_exceeding_recursion_limit(monkeypatch):
-    monkeypatch.setattr(settings, "retrieval_enable_normalize", True)
-    monkeypatch.setattr(settings, "retrieval_enable_rewrite", False)
-    monkeypatch.setattr(settings, "retrieval_enable_rerank", True)
-    monkeypatch.setattr(settings, "retrieval_agent_max_steps", 4)  # giới hạn thấp
-    _mock_vector_store(monkeypatch)
+def test_loop_broadens_until_satisfied_then_stops(monkeypatch):
+    _mock_common(monkeypatch)
+    rounds = {"assess": 0}
 
-    # Model "cứng đầu": luôn gọi lại tool, không bao giờ tự dừng -> phải test recursion_limit chặn được.
-    always_call_tool = _make_fake_model(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[ToolCall(name="query_vector_store", args={"query": "x"}, id="tc-repeat", type="tool_call")],
-            )
-        ]
+    def fake_chat(messages, **kw):
+        tag = kw.get("tag")
+        if tag == "retrieval_plan":
+            return '{"subgoals":[{"description":"phí thẻ","query":"phí thẻ Sung Túc"}]}'
+        if tag == "retrieval_assess":
+            rounds["assess"] += 1
+            satisfied = rounds["assess"] >= 2      # vòng 1 thiếu -> loop; vòng 2 đủ -> dừng
+            return '{"results":[{"id":"g1","satisfied":%s}]}' % ("true" if satisfied else "false")
+        return ""
+
+    monkeypatch.setattr(nodes.llm_client, "chat", fake_chat)
+    monkeypatch.setattr(engine, "_search", lambda q, k: [_chunk("c1", "d1", 0, 0.6, "phí ...")])
+
+    out = engine.build_graph().invoke(
+        {"question": "phí thẻ", "top_k": 5, "subgoals": [], "hops": 0, "tool_calls": [], "citations": []},
+        config={"recursion_limit": 20},
     )
+    assert rounds["assess"] == 2                    # đã loop đúng 1 lần rồi dừng
+    assert out["hops"] == 2
+    assert len(out["citations"]) == 1
 
-    graph = engine.build_graph(model=always_call_tool)
-    # Không được raise GraphRecursionError ra ngoài, phải dừng và vẫn có citations từ tool đã gọi được.
-    result = graph.invoke({"question": "câu hỏi lặp vô hạn", "top_k": 5, "messages": []})
 
-    assert isinstance(result["citations"], list)
-    assert len(result["citations"]) >= 1
+def test_budget_caps_hops_when_never_satisfied(monkeypatch):
+    _mock_common(monkeypatch)
+    monkeypatch.setattr(settings, "retrieval_max_hops", 2)
+
+    def fake_chat(messages, **kw):
+        if kw.get("tag") == "retrieval_plan":
+            return '{"subgoals":[{"description":"x","query":"x"}]}'
+        if kw.get("tag") == "retrieval_assess":
+            return '{"results":[{"id":"g1","satisfied":false,"note":"thiếu"}]}'
+        return ""
+
+    monkeypatch.setattr(nodes.llm_client, "chat", fake_chat)
+    monkeypatch.setattr(engine, "_search", lambda q, k: [_chunk("c1", "d1", 0, 0.2, "yếu")])
+
+    out = engine.build_graph().invoke(
+        {"question": "x", "top_k": 5, "subgoals": [], "hops": 0, "tool_calls": [], "citations": []},
+        config={"recursion_limit": 20},
+    )
+    assert out["hops"] == 2                          # dừng đúng budget dù chưa satisfied
+    assert _cov(out)[0]["satisfied"] is False
+    assert _cov(out)[0]["note"]                      # nêu được phần còn thiếu
+
+
+def test_planning_disabled_single_subgoal(monkeypatch):
+    _mock_common(monkeypatch)
+    monkeypatch.setattr(settings, "retrieval_enable_planning", False)
+
+    def fake_chat(messages, **kw):
+        if kw.get("tag") == "retrieval_assess":
+            return '{"results":[{"id":"g1","satisfied":true}]}'
+        return ""
+
+    monkeypatch.setattr(nodes.llm_client, "chat", fake_chat)
+    monkeypatch.setattr(engine, "_search", lambda q, k: [_chunk("c1", "d1", 0, 0.9, "data")])
+
+    out = engine.build_graph().invoke(
+        {"question": "phí thường niên?", "top_k": 5, "subgoals": [], "hops": 0, "tool_calls": [], "citations": []},
+        config={"recursion_limit": 20},
+    )
+    assert len(_cov(out)) == 1                        # planning tắt -> 1 sub-goal = cả câu hỏi
+
+
+def _cov(out):
+    """engine.retrieve() bọc coverage; ở đây invoke() trả state thô -> tự build coverage."""
+    return engine._subgoal_coverage(out["subgoals"])

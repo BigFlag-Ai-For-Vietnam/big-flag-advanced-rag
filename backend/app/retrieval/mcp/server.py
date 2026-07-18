@@ -43,6 +43,7 @@ def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
         normalized_question=result["normalized_question"],
         rewritten_question=result["rewritten_question"],
         tool_calls=result["tool_calls"],
+        subgoals=result["subgoals"],
     )
 
 

@@ -39,20 +39,31 @@ class McpRetrieveRequest(BaseModel):
 
 
 class ToolCallTrace(BaseModel):
-    """1 lần react subgraph gọi tool trong lúc retrieval — phục vụ debug/quan sát."""
+    """1 lần gather gọi retrieve cho 1 sub-goal — phục vụ debug/quan sát."""
 
     tool: str
     args: dict
     hit_count: int
 
 
+class SubgoalCoverage(BaseModel):
+    """Coverage của 1 sub-goal sau agentic planning — để nêu rõ đã đủ / còn thiếu gì."""
+
+    description: str
+    query: str
+    satisfied: bool
+    note: str = ""
+    evidence_count: int = 0
+
+
 class RetrieveResult(BaseModel):
-    """Kết quả gọi tool `retrieve` của Retrieval Engine — citations + trace quá trình."""
+    """Kết quả gọi tool `retrieve` của Retrieval Engine — citations + trace + coverage."""
 
     citations: list[Citation]
     normalized_question: str
     rewritten_question: str
     tool_calls: list[ToolCallTrace]
+    subgoals: list[SubgoalCoverage] = []
 
 
 class McpRetrieveConfig(BaseModel):

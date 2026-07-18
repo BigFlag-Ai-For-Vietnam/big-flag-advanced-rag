@@ -13,7 +13,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.config import settings
-from app.schemas.playground import Citation, RetrieveResult
+from app.schemas.playground import Citation, RetrieveResult, SubgoalCoverage
 
 logger = logging.getLogger("retrieval.mcp.client")
 
@@ -54,4 +54,5 @@ async def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
         normalized_question=data.get("normalized_question", ""),
         rewritten_question=data.get("rewritten_question", ""),
         tool_calls=data.get("tool_calls", []),
+        subgoals=[SubgoalCoverage(**s) for s in data.get("subgoals", [])],
     )
