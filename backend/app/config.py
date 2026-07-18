@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     catalog_source: str = "chunks"
 
     # Giới hạn gọi API ngoài
-    llm_timeout: float = 120.0
+    llm_timeout: float = 150.0
     llm_max_retries: int = 3
+    interactive_llm_max_retries: int = 1
     vlm_max_concurrency: int = 4     # số page parse song song tối đa
     # Nếu VLM trả rỗng cho 1 trang, dùng text-layer của PDF (page.extract_text) làm dự phòng.
     # Giúp không bị "document rỗng" khi model không hỗ trợ vision hoặc PDF có sẵn text.

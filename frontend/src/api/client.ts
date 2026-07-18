@@ -115,6 +115,41 @@ export interface ShowcaseTraceStep {
   hit_count?: number;
 }
 
+export type ProgressPipeline = "playground" | "mcp" | "advanced" | "raw";
+export type ProgressStage =
+  | "normalize" | "rewrite" | "catalog" | "plan" | "kb_search"
+  | "graph_search" | "assess" | "loop" | "finalize" | "generate";
+export type ProgressStatus = "started" | "completed" | "skipped" | "warning" | "failed";
+
+export interface ProgressDetail {
+  subgoal_id?: string;
+  subgoal_description?: string;
+  query?: string;
+  hop?: number;
+  hit_count?: number;
+  graph_hit_count?: number;
+  satisfied?: boolean;
+  note?: string;
+  completed_subgoals?: number;
+  total_subgoals?: number;
+  subgoals?: Array<{ id: string; description: string }>;
+  coverage?: Array<{ subgoal_id: string; satisfied: boolean; note?: string }>;
+  reason?: string;
+}
+
+export interface ProgressEvent {
+  type: "progress";
+  run_id: string;
+  pipeline: ProgressPipeline;
+  seq: number;
+  stage: ProgressStage;
+  status: ProgressStatus;
+  label: string;
+  elapsed_ms: number;
+  duration_ms?: number;
+  detail?: ProgressDetail;
+}
+
 export interface ShowcaseMetrics {
   retrieval_ms: number | null;
   first_token_ms: number | null;

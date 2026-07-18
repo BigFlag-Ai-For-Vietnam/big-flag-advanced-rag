@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import AsyncIterator, Iterator
@@ -24,7 +25,9 @@ class LLMError(RuntimeError):
     pass
 
 
-def make_openai_client(async_client: bool = False) -> OpenAI | AsyncOpenAI:
+def make_openai_client(
+    async_client: bool = False, *, max_retries: int | None = None
+) -> OpenAI | AsyncOpenAI:
     """Factory public tạo client OpenAI-compatible trỏ FPT (dùng chung cho app + eval).
 
     Mọi code ngoài llm_client (kể cả backend/eval) KHÔNG tự dựng openai.OpenAI —
@@ -37,7 +40,7 @@ def make_openai_client(async_client: bool = False) -> OpenAI | AsyncOpenAI:
         api_key=settings.fpt_api_key,
         base_url=settings.fpt_base_url,
         timeout=settings.llm_timeout,
-        max_retries=settings.llm_max_retries,
+        max_retries=settings.llm_max_retries if max_retries is None else max_retries,
     )
 
 
@@ -93,6 +96,7 @@ def chat(
     temperature: float = 0.2,
     max_tokens: int | None = 1024,
     tag: str = "chat",
+    max_retries: int | None = None,
 ) -> str:
     """Gọi chat completion non-stream, trả về text.
 
@@ -111,7 +115,8 @@ def chat(
     payload_messages = _with_cache_control(messages, cacheable_prefix_index) if use_cache else messages
     extra_body = _thinking_extra(disable_thinking)
 
-    client = _client()
+    client = make_openai_client(max_retries=max_retries)
+    assert isinstance(client, OpenAI)
 
     def _call(msgs, eb):
         kwargs = dict(model=model, messages=msgs, temperature=temperature, max_tokens=max_tokens)
@@ -256,40 +261,62 @@ async def chat_stream_async(
     if disable_thinking is None:
         disable_thinking = settings.fpt_disable_thinking
 
-    client = make_openai_client(async_client=True)
-    assert isinstance(client, AsyncOpenAI)
+    # SDK không retry lỗi xuất hiện sau khi HTTP 200 đã mở SSE. Tự retry đúng 1 lần nếu
+    # provider đóng stream TRƯỚC delta đầu tiên; đã phát nội dung thì không retry để tránh lặp.
+    for attempt in range(2):
+        client = make_openai_client(async_client=True, max_retries=0)
+        assert isinstance(client, AsyncOpenAI)
+        emitted = False
 
-    async def _open_stream(eb):
-        kwargs = dict(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
-        )
-        if eb:
-            kwargs["extra_body"] = eb
-        return await client.chat.completions.create(**kwargs)
+        async def _open_stream(eb):
+            kwargs = dict(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            if eb:
+                kwargs["extra_body"] = eb
+            return await client.chat.completions.create(**kwargs)
 
-    try:
         try:
-            stream = await _open_stream(_thinking_extra(disable_thinking))
+            try:
+                stream = await _open_stream(_thinking_extra(disable_thinking))
+            except Exception as exc:  # noqa: BLE001
+                if _is_unsupported_param_error(exc):
+                    logger.warning("enable_thinking không hỗ trợ (async stream), fallback: %s", exc)
+                    stream = await _open_stream(None)
+                else:
+                    raise
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    emitted = True
+                    yield delta.content
+            return
         except Exception as exc:  # noqa: BLE001
-            if _is_unsupported_param_error(exc):
-                logger.warning("enable_thinking không hỗ trợ (async stream), fallback: %s", exc)
-                stream = await _open_stream(None)
-            else:
-                raise
-        async for chunk in stream:
-            if not chunk.choices:
+            if attempt == 0 and not emitted and _is_retryable_interactive_error(exc):
+                logger.warning("[%s] stream lỗi trước token đầu, retry 1 lần: %s", tag, exc)
+                await asyncio.sleep(0.5)
                 continue
-            delta = chunk.choices[0].delta
-            if delta and delta.content:
-                yield delta.content
-    except Exception as exc:  # noqa: BLE001
-        raise LLMError(f"chat_stream_async() lỗi [{tag}]: {exc}") from exc
-    finally:
-        await client.close()
+            raise LLMError(f"chat_stream_async() lỗi [{tag}]: {exc}") from exc
+        finally:
+            await client.close()
+
+
+def _is_retryable_interactive_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    return (
+        status in {404, 408, 409, 429}
+        or (isinstance(status, int) and status >= 500)
+        or any(marker in text for marker in (
+            "cancellederror", "event loop is closed", "bad gateway", "timeout", "timed out"
+        ))
+    )
 
 
 def vision(image_bytes: bytes, prompt: str, *, model: str | None = None, tag: str = "vision") -> str:

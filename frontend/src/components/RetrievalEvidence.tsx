@@ -1,7 +1,9 @@
 import { CircleAlert, CircleCheck, FileText, Target } from "lucide-react";
 import type { Citation, SubgoalCoverage } from "../api/client";
 
-export function CitationList({ citations, compact = false }: { citations: Citation[]; compact?: boolean }) {
+export function CitationList({ citations, compact = false, anchorPrefix = "citation" }: {
+  citations: Citation[]; compact?: boolean; anchorPrefix?: string;
+}) {
   return (
     <div>
       <p className="mb-2.5 flex items-center gap-2 text-sm font-semibold text-fg">
@@ -9,7 +11,11 @@ export function CitationList({ citations, compact = false }: { citations: Citati
       </p>
       <div className="space-y-2">
         {citations.map((citation, index) => (
-          <details key={`${citation.document_id}:${citation.chunk_index}:${index}`} className="rounded-xl border bg-surface shadow-sm">
+          <details
+            id={`${anchorPrefix}-${index + 1}`}
+            key={`${citation.document_id}:${citation.chunk_index}:${index}`}
+            className="scroll-mt-5 rounded-xl border bg-surface shadow-sm target:border-accent target:ring-2 target:ring-accent/20"
+          >
             <summary className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5">
               <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent-soft font-mono text-xs font-bold text-accent">
                 {index + 1}

@@ -170,6 +170,7 @@ cd infra && cp .env.example .env && docker compose up --build
 | POST | `/api/documents/{id}/reprocess` | Chạy lại pipeline |
 | DELETE | `/api/documents/{id}` | Xoá document + pages + chunks + Qdrant points |
 | POST | `/api/playground/query` | RAG query (`stream: true` → SSE) |
+| POST | `/api/playground/mcp-retrieve/stream` | Debug Retrieval Engine qua MCP với progress SSE theo từng bước |
 | POST | `/api/showcase/compare` | SSE so sánh Advanced RAG và Raw Vector RAG trên cùng input |
 
 ## Test

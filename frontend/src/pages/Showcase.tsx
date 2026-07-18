@@ -13,11 +13,16 @@ import {
   type ShowcaseTraceStep,
   type SubgoalCoverage,
   type ToolCallTrace,
+  type ProgressEvent,
 } from "../api/client";
 import { CitationList, CoveragePanel } from "../components/RetrievalEvidence";
 import GraphEvidence from "../components/GraphEvidence";
 import { cn } from "../lib/cn";
 import { SHOWCASE_PRESETS } from "./showcasePresets";
+import AgentActivity from "../components/AgentActivity";
+import AnswerMarkdown from "../components/AnswerMarkdown";
+import { consumeSse } from "../lib/sse";
+import { upsertProgress } from "../lib/progress";
 
 type RunStatus = "idle" | "retrieving" | "generating" | "done" | "error" | "cancelled";
 
@@ -34,6 +39,7 @@ interface PipelineResult {
   normalizedQuestion: string;
   rewrittenQuestion: string;
   metrics: ShowcaseMetrics;
+  progress: ProgressEvent[];
 }
 
 const emptyMetrics = (): ShowcaseMetrics => ({
@@ -53,6 +59,7 @@ const emptyResult = (): PipelineResult => ({
   normalizedQuestion: "",
   rewrittenQuestion: "",
   metrics: emptyMetrics(),
+  progress: [],
 });
 
 const PIPELINES: ShowcasePipeline[] = ["advanced", "raw"];
@@ -73,6 +80,8 @@ export default function ShowcasePage() {
   const [elapsed, setElapsed] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
   const startedAtRef = useRef(0);
+  const pendingAnswerRef = useRef<Record<ShowcasePipeline, string>>({ advanced: "", raw: "" });
+  const flushTimersRef = useRef<Record<ShowcasePipeline, number | null>>({ advanced: null, raw: null });
 
   useEffect(() => {
     if (!busy) return;
@@ -80,16 +89,44 @@ export default function ShowcasePage() {
     return () => window.clearInterval(timer);
   }, [busy]);
 
-  useEffect(() => () => controllerRef.current?.abort(), []);
+  useEffect(() => () => {
+    controllerRef.current?.abort();
+    for (const pipeline of PIPELINES) {
+      const timer = flushTimersRef.current[pipeline];
+      if (timer != null) window.clearTimeout(timer);
+    }
+  }, []);
 
   const updatePipeline = (pipeline: ShowcasePipeline, update: (old: PipelineResult) => PipelineResult) => {
     setResults((current) => ({ ...current, [pipeline]: update(current[pipeline]) }));
   };
 
+  const flushAnswer = (pipeline: ShowcasePipeline) => {
+    const timer = flushTimersRef.current[pipeline];
+    if (timer != null) window.clearTimeout(timer);
+    flushTimersRef.current[pipeline] = null;
+    const text = pendingAnswerRef.current[pipeline];
+    if (!text) return;
+    pendingAnswerRef.current[pipeline] = "";
+    updatePipeline(pipeline, (old) => ({ ...old, answer: old.answer + text }));
+  };
+
+  const queueAnswer = (pipeline: ShowcasePipeline, text: string) => {
+    pendingAnswerRef.current[pipeline] += text;
+    if (flushTimersRef.current[pipeline] == null) {
+      flushTimersRef.current[pipeline] = window.setTimeout(() => flushAnswer(pipeline), 40);
+    }
+  };
+
   const handleEvent = (event: any) => {
     const pipeline = event.pipeline as ShowcasePipeline | undefined;
     if (pipeline && !PIPELINES.includes(pipeline)) return;
-    if (event.type === "pipeline_context" && pipeline) {
+    if (event.type === "progress" && pipeline) {
+      updatePipeline(pipeline, (old) => ({
+        ...old,
+        progress: upsertProgress(old.progress, event as ProgressEvent),
+      }));
+    } else if (event.type === "pipeline_context" && pipeline) {
       updatePipeline(pipeline, (old) => ({
         ...old,
         status: "generating",
@@ -108,8 +145,10 @@ export default function ShowcasePage() {
         },
       }));
     } else if (event.type === "pipeline_token" && pipeline) {
-      updatePipeline(pipeline, (old) => ({ ...old, status: "generating", answer: old.answer + (event.content ?? "") }));
+      updatePipeline(pipeline, (old) => ({ ...old, status: "generating" }));
+      queueAnswer(pipeline, event.content ?? "");
     } else if (event.type === "pipeline_done" && pipeline) {
+      flushAnswer(pipeline);
       updatePipeline(pipeline, (old) => ({
         ...old,
         status: "done",
@@ -121,6 +160,7 @@ export default function ShowcasePage() {
         },
       }));
     } else if (event.type === "pipeline_error" && pipeline) {
+      flushAnswer(pipeline);
       updatePipeline(pipeline, (old) => ({
         ...old, status: "error", error: event.message || "Pipeline gặp lỗi.",
         metrics: { ...old.metrics, total_ms: event.total_ms ?? null },
@@ -139,37 +179,20 @@ export default function ShowcasePage() {
     setElapsed(0);
     setRunFinished(false);
     setBusy(true);
+    pendingAnswerRef.current = { advanced: "", raw: "" };
     setResults({
       advanced: { ...emptyResult(), status: "retrieving" },
       raw: { ...emptyResult(), status: "retrieving" },
     });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/showcase/compare`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: query, top_k: topK }),
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split("\n\n");
-        buffer = frames.pop() ?? "";
-        for (const frame of frames) {
-          const line = frame.trim();
-          if (!line.startsWith("data:")) continue;
-          const data = line.slice(5).trim();
-          if (!data || data === "[DONE]") continue;
-          try { handleEvent(JSON.parse(data)); } catch { /* ignore malformed SSE frame */ }
-        }
-      }
+      await consumeSse(
+        `${API_BASE_URL}/api/showcase/compare`,
+        { question: query, top_k: topK },
+        controller.signal,
+        handleEvent,
+      );
+      PIPELINES.forEach(flushAnswer);
     } catch (error: any) {
       if (error?.name === "AbortError") return;
       setResults((current) => {
@@ -190,6 +213,7 @@ export default function ShowcasePage() {
 
   const cancel = () => {
     controllerRef.current?.abort();
+    PIPELINES.forEach(flushAnswer);
     setResults((current) => {
       const next = { ...current };
       for (const pipeline of PIPELINES) {
@@ -325,16 +349,11 @@ function PipelineCard({ pipeline, result, liveElapsed }: {
           </div>
           <StatusBadge status={result.status} />
         </div>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {(advanced
-            ? ["Normalize", "Rewrite", "Plan", "Vector + KG", "Assess"]
-            : ["Embed", "Qdrant top-k", "Generate"]
-          ).map((step) => <span key={step} className="rounded-full border bg-surface/70 px-2.5 py-1 font-mono text-[10px] text-muted">{step}</span>)}
-        </div>
       </header>
 
       <div className="space-y-5 p-4 sm:p-5">
         <MetricRow metrics={result.metrics} liveElapsed={active ? liveElapsed : null} />
+        <AgentActivity events={result.progress} active={active} title="Pipeline trace" />
         {result.error ? (
           <div className="flex gap-2 rounded-xl border border-rose-300/50 bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/20 dark:text-rose-300">
             <CircleAlert className="mt-0.5 size-4 shrink-0" /> {result.error}
@@ -344,8 +363,10 @@ function PipelineCard({ pipeline, result, liveElapsed }: {
             <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-faint">
               <Sparkles className="size-3.5 text-accent" /> Câu trả lời
             </p>
-            <div className={cn("min-h-28 whitespace-pre-wrap text-[15px] leading-relaxed text-fg", active && "caret-blink")}>
-              {result.answer || statusCopy(result.status)}
+            <div className={cn("min-h-28", active && "caret-blink")}>
+              {result.answer
+                ? <AnswerMarkdown content={result.answer} citations={result.citations} anchorPrefix={`${pipeline}-citation`} />
+                : statusCopy(result.status)}
             </div>
           </div>
         )}
@@ -384,7 +405,9 @@ function PipelineCard({ pipeline, result, liveElapsed }: {
 
         {result.subgoals.length > 0 && <CoveragePanel subgoals={result.subgoals} />}
         {advanced && <GraphEvidence facts={result.graphFacts} />}
-        {result.citations.length > 0 && <CitationList citations={result.citations} compact />}
+        {result.citations.length > 0 && (
+          <CitationList citations={result.citations} compact anchorPrefix={`${pipeline}-citation`} />
+        )}
       </div>
     </section>
   );

@@ -67,11 +67,13 @@ def test_raw_pipeline_is_dense_only_and_streams(monkeypatch):
     payloads = [payload for payload, _terminal in events]
 
     assert calls == [("câu hỏi", 3)]
-    assert [p["type"] for p in payloads] == [
+    assert [p["type"] for p in payloads if p["type"] != "progress"] == [
         "pipeline_context", "pipeline_token", "pipeline_token", "pipeline_done"
     ]
-    assert payloads[0]["pipeline"] == "raw"
-    assert payloads[0]["trace"][1]["stage"] == "qdrant"
+    context = next(p for p in payloads if p["type"] == "pipeline_context")
+    assert context["pipeline"] == "raw"
+    assert context["trace"][1]["stage"] == "qdrant"
+    assert any(p["type"] == "progress" and p["stage"] == "kb_search" for p in payloads)
     assert payloads[-1]["citation_count"] == 1
     assert events[-1][1] is True
 
@@ -100,7 +102,7 @@ def test_advanced_pipeline_exposes_trace_and_coverage(monkeypatch):
         subgoals=[coverage],
     )
 
-    async def fake_retrieve(question, top_k):
+    async def fake_retrieve(question, top_k, **_kwargs):
         return result
 
     async def fake_stream(_messages, **_kwargs):
@@ -122,7 +124,7 @@ def test_advanced_pipeline_exposes_trace_and_coverage(monkeypatch):
     events = _drain_worker(
         lambda queue: showcase._run_advanced(req, queue, showcase.time.perf_counter())
     )
-    context = events[0][0]
+    context = next(payload for payload, _terminal in events if payload["type"] == "pipeline_context")
 
     assert context["pipeline"] == "advanced"
     assert context["rewritten_question"] == "q rõ hơn"
@@ -134,14 +136,14 @@ def test_advanced_pipeline_exposes_trace_and_coverage(monkeypatch):
 
 
 def test_compare_stream_keeps_other_pipeline_alive_after_error(monkeypatch):
-    async def failed(_req, queue, _started):
+    async def failed(_req, queue, _started, _run_id=""):
         await showcase._emit(
             queue,
             {"type": "pipeline_error", "pipeline": "advanced", "message": "MCP down"},
             terminal=True,
         )
 
-    async def successful(_req, queue, _started):
+    async def successful(_req, queue, _started, _run_id=""):
         await showcase._emit(
             queue,
             {"type": "pipeline_token", "pipeline": "raw", "content": "ok"},
@@ -174,3 +176,23 @@ def test_compare_stream_keeps_other_pipeline_alive_after_error(monkeypatch):
     assert any(e["type"] == "pipeline_token" and e["pipeline"] == "raw" for e in events)
     assert any(e["type"] == "pipeline_done" and e["pipeline"] == "raw" for e in events)
     assert events[-1]["type"] == "run_done"
+
+
+def test_raw_generation_error_emits_failed_step_and_safe_message(monkeypatch):
+    monkeypatch.setattr(showcase.qa_service, "retrieve", lambda _question, _top_k: [])
+
+    async def failed_stream(_messages, **_kwargs):
+        if False:
+            yield ""
+        raise RuntimeError("secret provider detail")
+
+    monkeypatch.setattr(showcase.llm_client, "chat_stream_async", failed_stream)
+    req = ShowcaseCompareRequest(question="q", top_k=5)
+    events = _drain_worker(lambda queue: showcase._run_raw(req, queue, showcase.time.perf_counter()))
+    payloads = [payload for payload, _terminal in events]
+
+    failed = next(p for p in payloads if p["type"] == "progress" and p["status"] == "failed")
+    error = next(p for p in payloads if p["type"] == "pipeline_error")
+    assert failed["stage"] == "generate"
+    assert "secret provider detail" not in error["message"]
+    assert "Vui lòng thử lại" in error["message"]

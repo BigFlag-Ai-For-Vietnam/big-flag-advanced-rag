@@ -7,7 +7,9 @@ Claude Code gọi — không có đường tắt nào khác.
 from __future__ import annotations
 
 import logging
+import json
 from contextlib import AsyncExitStack
+from typing import Awaitable, Callable
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -40,12 +42,32 @@ async def close() -> None:
     _session = None
 
 
-async def retrieve(question: str, top_k: int = 5) -> RetrieveResult:
+ProgressCallback = Callable[[dict], Awaitable[None]]
+
+
+async def retrieve(
+    question: str, top_k: int = 5, *, progress: ProgressCallback | None = None
+) -> RetrieveResult:
     """Gọi đúng 1 lần tool `retrieve` của Retrieval Engine — trả về citations + trace
     (normalized/rewritten question, tool đã gọi kèm hit_count)."""
     if _session is None:
         raise RuntimeError("MCP client chưa kết nối — connect() phải chạy ở FastAPI startup trước.")
-    result = await _session.call_tool("retrieve", {"question": question, "top_k": top_k})
+    async def _progress_callback(_value: float, _total: float | None, message: str | None) -> None:
+        if progress is None or not message:
+            return
+        try:
+            event = json.loads(message)
+        except (TypeError, json.JSONDecodeError):
+            logger.warning("[mcp.client] bỏ qua progress payload không hợp lệ: %r", message)
+            return
+        if isinstance(event, dict) and event.get("v") == 1:
+            await progress(event)
+
+    result = await _session.call_tool(
+        "retrieve",
+        {"question": question, "top_k": top_k},
+        progress_callback=_progress_callback if progress is not None else None,
+    )
     if result.isError:
         raise RuntimeError(f"Retrieval Engine trả lỗi: {result.content}")
     data = result.structuredContent or {}

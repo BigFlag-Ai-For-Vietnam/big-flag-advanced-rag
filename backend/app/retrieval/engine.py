@@ -18,7 +18,9 @@ Trả về citations (có provenance) + trace + coverage từng sub-goal (để 
 from __future__ import annotations
 
 import logging
-from typing import TypedDict
+import time
+from contextvars import ContextVar
+from typing import Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -29,6 +31,34 @@ from app.schemas.playground import Citation, GraphFact
 from app.services import graph_service
 
 logger = logging.getLogger("retrieval.engine")
+
+ProgressReporter = Callable[[dict], None]
+CancelChecker = Callable[[], bool]
+_progress_reporter: ContextVar[ProgressReporter | None] = ContextVar("retrieval_progress", default=None)
+_cancel_checker: ContextVar[CancelChecker | None] = ContextVar("retrieval_cancel", default=None)
+
+
+class RetrievalCancelled(Exception):
+    """Pipeline bị caller hủy tại checkpoint an toàn giữa các bước."""
+
+
+def _check_cancel() -> None:
+    checker = _cancel_checker.get()
+    if checker and checker():
+        raise RetrievalCancelled("Retrieval đã bị hủy.")
+
+
+def _emit(stage: str, status: str, label: str, *, started: float | None = None, detail: dict | None = None) -> None:
+    _check_cancel()
+    reporter = _progress_reporter.get()
+    if reporter is None:
+        return
+    event = {"v": 1, "stage": stage, "status": status, "label": label}
+    if started is not None:
+        event["duration_ms"] = max(0, round((time.perf_counter() - started) * 1000))
+    if detail:
+        event["detail"] = detail
+    reporter(event)
 
 
 class EngineState(TypedDict):
@@ -113,22 +143,67 @@ def _merge_graph_evidence(existing: list[dict], facts: list[dict]) -> list[dict]
 # ------------------------------------------------------------------ nodes
 
 def _normalize_step(state: EngineState) -> dict:
-    return {"normalized_question": nodes.normalize(state["question"])}
+    started = time.perf_counter()
+    enabled = settings.retrieval_enable_normalize
+    _emit("normalize", "started", "Đang chuẩn hóa câu hỏi")
+    value = nodes.normalize(state["question"])
+    _emit(
+        "normalize", "completed" if enabled else "skipped",
+        "Đã chuẩn hóa câu hỏi" if enabled else "Bỏ qua chuẩn hóa câu hỏi",
+        started=started,
+    )
+    return {"normalized_question": value}
 
 
 def _rewrite_step(state: EngineState) -> dict:
-    return {"rewritten_question": nodes.rewrite(state["normalized_question"])}
+    started = time.perf_counter()
+    enabled = settings.retrieval_enable_rewrite
+    _emit("rewrite", "started", "Đang viết lại truy vấn")
+    try:
+        value = nodes.rewrite(state["normalized_question"])
+    except Exception as exc:  # noqa: BLE001 — rewrite là bước tăng chất lượng, không được chặn retrieval
+        logger.warning("[rewrite] lỗi provider, dùng câu hỏi đã normalize: %s", exc)
+        value = state["normalized_question"]
+        _emit(
+            "rewrite", "warning", "Không thể viết lại truy vấn, dùng câu hỏi gốc",
+            started=started, detail={"reason": type(exc).__name__},
+        )
+        return {"rewritten_question": value}
+    _emit(
+        "rewrite", "completed" if enabled else "skipped",
+        "Đã viết lại truy vấn" if enabled else "Giữ nguyên truy vấn",
+        started=started,
+        detail={"query": value},
+    )
+    return {"rewritten_question": value}
 
 
 def _plan_step(state: EngineState) -> dict:
     q = state["rewritten_question"]
+    catalog_started = time.perf_counter()
+    _emit("catalog", "started", "Đang đọc catalog tài liệu")
     outline = _catalog_outline(q, state["top_k"])
+    _emit(
+        "catalog", "completed" if outline else "skipped",
+        "Đã tải catalog liên quan" if outline else "Không có catalog phù hợp",
+        started=catalog_started,
+    )
+    plan_started = time.perf_counter()
+    _emit("plan", "started", "Đang lập kế hoạch truy hồi")
     subgoals = nodes.plan(q, outline)
     for sg in subgoals:
         sg.setdefault("evidence", [])
         sg.setdefault("graph_evidence", [])
         sg.setdefault("satisfied", False)
         sg.setdefault("note", "")
+    _emit(
+        "plan", "completed", f"Đã lập kế hoạch gồm {len(subgoals)} mục tiêu",
+        started=plan_started,
+        detail={
+            "total_subgoals": len(subgoals),
+            "subgoals": [{"id": sg["id"], "description": sg["description"]} for sg in subgoals],
+        },
+    )
     return {"subgoals": subgoals, "hops": 0, "tool_calls": []}
 
 
@@ -139,30 +214,80 @@ def _gather_step(state: EngineState) -> dict:
     k = settings.retrieval_per_subgoal_k
 
     for sg in subgoals:
+        _check_cancel()
         if sg.get("satisfied"):
             continue
         # vòng sau: broaden bằng chính "note" của assess (nói còn thiếu gì) để nhắm đúng chỗ hổng
         query = sg["query"] if hops == 0 else f"{sg['query']} {sg.get('note') or 'chi tiết cụ thể'}".strip()
+        detail = {
+            "subgoal_id": sg["id"], "subgoal_description": sg["description"],
+            "query": query, "hop": hops + 1,
+        }
+        search_started = time.perf_counter()
+        _emit("kb_search", "started", f"Đang tìm KB: {sg['description']}", detail=detail)
         hits = _search(query, k)
         sg["evidence"] = _merge_evidence(sg.get("evidence", []), hits)
         trace.append({"tool": "query_vector_store", "args": {"query": query, "subgoal": sg["id"]}, "hit_count": len(hits)})
+        _emit(
+            "kb_search", "completed", f"Tìm thấy {len(hits)} đoạn cho {sg['description']}",
+            started=search_started, detail={**detail, "hit_count": len(hits)},
+        )
 
+        graph_enabled = settings.retrieval_enable_graph and graph_service.is_configured()
+        graph_started = time.perf_counter()
+        _emit("graph_search", "started", f"Đang duyệt knowledge graph: {sg['description']}", detail=detail)
         graph_facts = _graph_search(query, hits)
         sg["graph_evidence"] = _merge_graph_evidence(sg.get("graph_evidence", []), graph_facts)
         if graph_facts:
             trace.append({"tool": "query_graph_knowledge", "args": {"query": query, "subgoal": sg["id"]}, "hit_count": len(graph_facts)})
+        _emit(
+            "graph_search", "completed" if graph_enabled else "skipped",
+            f"Tìm thấy {len(graph_facts)} quan hệ đồ thị" if graph_enabled else "Knowledge graph chưa bật",
+            started=graph_started, detail={**detail, "graph_hit_count": len(graph_facts)},
+        )
 
     return {"subgoals": subgoals, "hops": hops + 1, "tool_calls": trace}
 
 
 def _assess_step(state: EngineState) -> dict:
-    return {"subgoals": nodes.assess(state["subgoals"])}
+    started = time.perf_counter()
+    # `hop` là một phần identity của progress event. Gửi nó ở cả started và
+    # completed để frontend thay thế đúng row thay vì để lại spinner mồ côi.
+    _emit(
+        "assess", "started", "Đang kiểm tra độ đầy đủ bằng chứng",
+        detail={"hop": state["hops"]},
+    )
+    subgoals = nodes.assess(state["subgoals"])
+    completed = sum(1 for sg in subgoals if sg.get("satisfied"))
+    _emit(
+        "assess", "completed", f"Độ phủ bằng chứng {completed}/{len(subgoals)}",
+        started=started,
+        detail={
+            "completed_subgoals": completed,
+            "total_subgoals": len(subgoals),
+            "hop": state["hops"],
+            "coverage": [
+                {"subgoal_id": sg["id"], "satisfied": bool(sg.get("satisfied")), "note": sg.get("note", "")}
+                for sg in subgoals
+            ],
+        },
+    )
+    return {"subgoals": subgoals}
 
 
 def _route_after_assess(state: EngineState) -> str:
     all_satisfied = all(sg.get("satisfied") for sg in state["subgoals"])
     if all_satisfied or state["hops"] >= settings.retrieval_max_hops:
+        _emit(
+            "loop", "completed",
+            "Bằng chứng đã đủ, chuyển sang tổng hợp" if all_satisfied else "Đã dùng hết lượt tìm kiếm",
+            detail={"hop": state["hops"]},
+        )
         return "finalize"
+    _emit(
+        "loop", "warning", f"Còn thiếu bằng chứng, mở rộng truy vấn vòng {state['hops'] + 1}",
+        detail={"hop": state["hops"] + 1},
+    )
     return "gather"
 
 
@@ -172,6 +297,8 @@ def _finalize_step(state: EngineState) -> dict:
     Graph facts đi KÊNH RIÊNG (`graph_facts`), KHÔNG trộn chung với `citations`: citations là
     trích dẫn nguyên văn (chunk), graph facts là quan hệ/thực thể suy luận được — domain
     compliance cần phân biệt rõ 2 loại này (xem playground.py::_build_messages)."""
+    started = time.perf_counter()
+    _emit("finalize", "started", "Đang tổng hợp bằng chứng")
     subgoals = state["subgoals"]
     per = max(2, state["top_k"])  # tối thiểu mỗi sub-goal đóng góp tới `per` đoạn tốt nhất
     picked: dict[str, dict] = {}
@@ -205,6 +332,10 @@ def _finalize_step(state: EngineState) -> dict:
     logger.info(
         "[finalize] sub-goals=%s satisfied=%s citations=%s graph_facts=%s",
         len(subgoals), sum(1 for s in subgoals if s.get("satisfied")), len(citations), len(graph_facts),
+    )
+    _emit(
+        "finalize", "completed", f"Đã tổng hợp {len(citations)} nguồn và {len(graph_facts)} graph facts",
+        started=started, detail={"hit_count": len(citations), "graph_hit_count": len(graph_facts)},
     )
     return {"citations": citations, "graph_facts": graph_facts}
 
@@ -253,15 +384,27 @@ def _subgoal_coverage(subgoals: list[dict]) -> list[dict]:
     ]
 
 
-def retrieve(question: str, top_k: int = 5) -> dict:
+def retrieve(
+    question: str,
+    top_k: int = 5,
+    *,
+    progress: ProgressReporter | None = None,
+    cancelled: CancelChecker | None = None,
+) -> dict:
     """Chạy planner–executor–verifier. Trả citations + graph_facts + trace + coverage."""
-    result = _get_engine().invoke(
-        {
-            "question": question, "top_k": top_k, "subgoals": [], "hops": 0,
-            "tool_calls": [], "citations": [], "graph_facts": [],
-        },
-        config={"recursion_limit": 2 * settings.retrieval_max_hops + 6},
-    )
+    progress_token = _progress_reporter.set(progress)
+    cancel_token = _cancel_checker.set(cancelled)
+    try:
+        result = _get_engine().invoke(
+            {
+                "question": question, "top_k": top_k, "subgoals": [], "hops": 0,
+                "tool_calls": [], "citations": [], "graph_facts": [],
+            },
+            config={"recursion_limit": 2 * settings.retrieval_max_hops + 6},
+        )
+    finally:
+        _progress_reporter.reset(progress_token)
+        _cancel_checker.reset(cancel_token)
     return {
         "citations": result["citations"],
         "graph_facts": result["graph_facts"],
