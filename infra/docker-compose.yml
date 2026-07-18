@@ -30,6 +30,9 @@ services:
       # Cert Let's Encrypt thật cho big-rag.dev (sinh bằng certbot standalone trên VM,
       # renew qua cron). live/ chứa symlink vào archive/ nên phải mount cả cây thư mục.
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Basic Auth: file hash .htpasswd để NGOÀI git (secret), tạo tay trên VM (xem
+      # nginx/app.conf). Phải tồn tại trước khi nginx up, nếu không Docker tạo thư mục.
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
     depends_on:
       nginx-certs:
         condition: service_completed_successfully

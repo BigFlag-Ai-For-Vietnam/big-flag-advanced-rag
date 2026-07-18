@@ -40,3 +40,6 @@ Thumbs.db
 meokit/
 .claude/skills/
 CLAUDE.local.md
+
+# nginx Basic Auth credentials (hash) — secret, created on the VM
+infra/nginx/.htpasswd
