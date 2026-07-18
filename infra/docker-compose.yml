@@ -27,6 +27,9 @@ services:
     volumes:
       - ./nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
       - nginx_certs:/etc/nginx/certs:ro
+      # Cert Let's Encrypt thật cho big-rag.dev (sinh bằng certbot standalone trên VM,
+      # renew qua cron). live/ chứa symlink vào archive/ nên phải mount cả cây thư mục.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       nginx-certs:
         condition: service_completed_successfully
