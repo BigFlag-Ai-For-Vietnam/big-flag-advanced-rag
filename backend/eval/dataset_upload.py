@@ -30,6 +30,17 @@ def sample_id(question: str | None, persona_name: str | None = None) -> str:
     return str(uuid.uuid5(_SAMPLE_ID_NAMESPACE, key))
 
 
+def hop_type(synthesizer_name: str | None) -> str:
+    """Loại record theo số bước truy hồi: 'single-hop' | 'multi-hop' | 'unknown'.
+    Suy ra từ synthesizer ragas (single_hop_* vs multi_hop_*)."""
+    s = synthesizer_name or ""
+    if s.startswith("single_hop"):
+        return "single-hop"
+    if s.startswith("multi_hop"):
+        return "multi-hop"
+    return "unknown"
+
+
 def build_records(samples: list[dict], *, model: str | None = None) -> list[dict]:
     """Sample silver (post-gate, dict với user_input/reference/reference_contexts) -> record
     MLflow Evaluation Dataset. Hàm thuần, không import mlflow — dễ test.
@@ -57,6 +68,9 @@ def build_records(samples: list[dict], *, model: str | None = None) -> list[dict
                 # sample_id nằm trong tags (KHÔNG vào inputs): inputs là record-identity
                 # của merge_records — thêm field vào đó sẽ phá upsert idempotent.
                 "sample_id": sample_id(s.get("user_input"), s.get("persona_name")),
+                # Loại record: single-hop vs multi-hop (dẫn xuất từ synthesizer ragas).
+                "hop_type": hop_type(s.get("synthesizer_name")),
+                "synthesizer_name": s.get("synthesizer_name") or "",
                 **({"generation_model": model} if model else {}),
             },
         }

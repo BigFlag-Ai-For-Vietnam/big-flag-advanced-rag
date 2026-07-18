@@ -31,16 +31,48 @@ class DistributionWeights:
             )
 
 
+# Ràng buộc văn phong + de-reference tiêm THẲNG vào prompt sinh query của ragas (mọi synthesizer),
+# để `dataset generate` sinh ra câu hỏi kiểu v3 NGAY LÚC generate — không cần bước rewrite hậu kỳ:
+# câu hỏi tự nhiên như nhân viên ngân hàng thật hỏi, KHÔNG trích tên/số hiệu văn bản, số Điều/Khoản,
+# nhãn phiên bản; chỉ hỏi về nội dung/tình huống. Answer vẫn phải trung thực theo context.
+_STYLE_MARKER = "### Phong cách & ràng buộc de-reference"
+_STYLE_INSTRUCTION = (
+    "\n\n" + _STYLE_MARKER + " (BẮT BUỘC cho QUERY):\n"
+    "- Viết QUERY bằng tiếng Việt tự nhiên, đúng giọng một nhân viên ngân hàng thật hỏi trong công "
+    "việc (đời thường, hỏi thẳng vào tình huống), KHÔNG máy móc/sách vở.\n"
+    "- TUYỆT ĐỐI KHÔNG nêu trong QUERY: tên/số hiệu văn bản (Nghị định, Thông tư, Quyết định kèm số "
+    "như 88/2024/NĐ-CP, 04/2025/TT-NHNN, QĐ 342...), số Điều/Khoản, nhãn phiên bản (v1.0, phiên bản "
+    "2.0), hay tiêu đề tài liệu.\n"
+    "- Người hỏi KHÔNG biết & KHÔNG trích số hiệu văn bản — chỉ hỏi về NỘI DUNG/QUY ĐỊNH/tình huống "
+    "(ngưỡng, thời hạn, quy trình, được phép hay không). Giữ nguyên các con số nội dung (tiền, năm, "
+    "số ký tự...).\n"
+    "- Nếu là câu so sánh giữa quy định cũ và mới, hỏi kiểu 'quy định ... hiện nay áp dụng thế nào / "
+    "gần đây có thay đổi gì' mà KHÔNG nêu tên văn bản nào.\n"
+    "- ANSWER vẫn phải trung thực 100% theo context (answer có thể nêu nguồn; chỉ QUERY là không được)."
+)
+
+
+def _apply_style(synth):
+    """Tiêm ràng buộc de-reference + văn phong tự nhiên vào prompt sinh query của synthesizer
+    (idempotent — không tiêm lại nếu đã có marker)."""
+    prompt = getattr(synth, "generate_query_reference_prompt", None)
+    if prompt is not None and _STYLE_MARKER not in prompt.instruction:
+        prompt.instruction = prompt.instruction + _STYLE_INSTRUCTION
+    return synth
+
+
 def build_query_distribution(llm, weights: DistributionWeights | None = None):
     """Trả về query_distribution tường minh cho ragas TestsetGenerator.
 
     KHÔNG dùng default_query_distribution (nó lọc bỏ synthesizer thầm lặng và có thể raise).
+    Mỗi synthesizer được tiêm ràng buộc de-reference + văn phong tự nhiên vào prompt (_apply_style)
+    nên câu hỏi sinh ra đã ở dạng thực tế (không trích số hiệu văn bản) ngay từ đầu.
     """
     weights = weights or DistributionWeights()  # __post_init__ đã validate
     return [
-        (SingleHopSpecificQuerySynthesizer(llm=llm), weights.single_hop_specific),
-        (MultiHopAbstractQuerySynthesizer(llm=llm), weights.multi_hop_abstract),
-        (MultiHopSpecificQuerySynthesizer(llm=llm), weights.multi_hop_specific),
+        (_apply_style(SingleHopSpecificQuerySynthesizer(llm=llm)), weights.single_hop_specific),
+        (_apply_style(MultiHopAbstractQuerySynthesizer(llm=llm)), weights.multi_hop_abstract),
+        (_apply_style(MultiHopSpecificQuerySynthesizer(llm=llm)), weights.multi_hop_specific),
     ]
 
 

@@ -1,10 +1,22 @@
 [
   {
-    "name": "Khách hàng cá nhân",
-    "role_description": "Người dùng phổ thông lần đầu tìm hiểu sản phẩm thẻ tín dụng, chưa quen thuật ngữ tài chính, hỏi các câu hỏi cơ bản về phí, điều kiện mở thẻ."
+    "name": "Giao dịch viên",
+    "role_description": "Giao dịch viên tại quầy của DongDoBank (DDB), trực tiếp mở tài khoản và xử lý giao dịch cho khách hàng. Hỏi các câu nghiệp vụ front-line: quy trình nhận biết khách hàng (KYC) khi mở tài khoản, ngưỡng giao dịch tiền mặt phải báo cáo, cách xử lý dữ liệu cá nhân của khách và khi nào phải xin đồng ý. Câu hỏi thực tế, hướng tình huống, cần con số cụ thể (theo QĐ 480, QĐ 455)."
   },
   {
-    "name": "Chuyên viên tư vấn tài chính",
-    "role_description": "Người có kiến thức chuyên sâu về sản phẩm tài chính, đặt câu hỏi kỹ thuật, so sánh điều khoản, hỏi các trường hợp đặc biệt/ngoại lệ."
+    "name": "Cán bộ tín dụng",
+    "role_description": "Cán bộ tín dụng của DDB, thẩm định và ra quyết định cho vay, có dùng công cụ chấm điểm/AI hỗ trợ. Hỏi về yêu cầu con người giám sát (human-in-the-loop) với quyết định tín dụng, các trường hợp AI bị cấm, dùng dữ liệu khách hàng để huấn luyện mô hình có cần đồng ý/ẩn danh không, và ranh giới được phép (theo TT 04, QĐ 502, QĐ 455)."
+  },
+  {
+    "name": "Chuyên viên Tuân thủ & Pháp chế",
+    "role_description": "Nhân viên Khối Pháp chế và Tuân thủ của DDB, rà soát tính tuân thủ giữa quy định nội bộ và văn bản Nhà nước (Nghị định, Thông tư NHNN). Đặt câu hỏi liên hệ chéo nhiều tài liệu: quy định nào thay thế/hết hiệu lực, xung đột và thứ tự ưu tiên giữa các quyết định, ngoại lệ (carve-out) về thời hạn lưu trữ. Luôn trích dẫn Điều/Khoản cụ thể."
+  },
+  {
+    "name": "Chuyên viên Phòng chống rửa tiền",
+    "role_description": "Chuyên viên Bộ phận AML/KYC của DDB, áp dụng TT 20/2024/TT-NHNN và Quyết định nội bộ QĐ 480. Hỏi về ngưỡng báo cáo giao dịch tiền mặt, các dấu hiệu giao dịch đáng ngờ, thời hạn báo cáo, quy trình nhận biết khách hàng (KYC) và thời gian lưu hồ sơ. Cần con số và mốc thời gian chính xác."
+  },
+  {
+    "name": "Chuyên viên An toàn thông tin",
+    "role_description": "Kỹ sư An toàn thông tin (Khối CNTT/SOC) của DDB, vận hành theo TT 09/2024/TT-NHNN và các Quyết định nội bộ QĐ 215/342/401. Hỏi về phân loại cấp độ hệ thống, xác thực đa yếu tố (MFA), chính sách mật khẩu, thời gian lưu log, mã hóa, khóa phiên và quy định làm việc từ xa/VPN. Câu hỏi kỹ thuật, cụ thể theo tiêu chuẩn."
   }
 ]

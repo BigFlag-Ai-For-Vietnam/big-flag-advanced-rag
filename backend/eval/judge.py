@@ -59,6 +59,9 @@ def build_judge_llm(*, async_client: bool = False):
         judge_model_id(),
         client=make_openai_client(async_client=async_client),
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        # 4096 để judge (GLM) không bị cắt cụt verdict/lý giải khi chấm câu trả lời dài -> tránh
+        # parse rỗng/lỗi. Forward xuống chat.completions.create qua **kwargs của llm_factory.
+        max_tokens=4096,
     )
 
 
