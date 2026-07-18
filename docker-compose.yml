@@ -45,8 +45,10 @@ services:
       - ./backend/data:/data
   frontend:
     build: ./frontend
-    # KHÔNG publish 5173: nginx (stack infra/) serve frontend trên 80/443 và proxy
-    # HMR websocket của Vite; vào app qua http(s)://localhost.
+    # Publish Vite trực tiếp để có thể kiểm tra FE tại http://localhost:5173,
+    # kể cả khi nginx local chưa khởi động được.
+    ports:
+      - "5173:5173"
     environment:
       # Rỗng = same-origin: FE gọi /api trên chính host/cổng đang mở (80 hoặc 443 qua
       # nginx) — không hardcode cổng, không mixed-content khi vào bằng https.
