@@ -6,8 +6,8 @@
 services:
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
+    # KHÔNG publish port ra host: đường vào duy nhất là nginx (stack infra/) trên 80/443.
+    # Trong network, nginx/frontend/mcp vẫn gọi được backend:8000 theo service name.
     env_file:
       - .env
     environment:
@@ -45,13 +45,17 @@ services:
       - ./backend/data:/data
   frontend:
     build: ./frontend
-    ports:
-      - "5173:5173"
+    # KHÔNG publish 5173: nginx (stack infra/) serve frontend trên 80/443 và proxy
+    # HMR websocket của Vite; vào app qua http(s)://localhost.
     environment:
-      # FE gọi backend qua localhost của máy host (browser chạy ngoài container)
-      VITE_API_BASE_URL: http://localhost:8000
+      # Rỗng = same-origin: FE gọi /api trên chính host/cổng đang mở (80 hoặc 443 qua
+      # nginx) — không hardcode cổng, không mixed-content khi vào bằng https.
+      VITE_API_BASE_URL: ""
     depends_on:
       - backend
+    networks:
+      - default
+      - infra
 
 networks:
   # Network của stack infra/ (docker compose ở đó tạo ra); phải tồn tại trước khi up.

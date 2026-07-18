@@ -12,6 +12,7 @@ docker compose up --build
 
 | Service        | URL                     | Ghi chú                          |
 | -------------- | ----------------------- | -------------------------------- |
+| nginx          | http://localhost / https://localhost | cửa vào duy nhất của app: serve frontend + proxy `/api`+`/docs` về backend (self-signed cert cho 443) |
 | Qdrant         | http://localhost:6333   | vector DB (dashboard: `/dashboard`) |
 | MLflow UI      | http://localhost:5000   | tracking + artifact serving      |
 | RustFS Console | http://localhost:9001   | login bằng RUSTFS_ACCESS/SECRET  |
