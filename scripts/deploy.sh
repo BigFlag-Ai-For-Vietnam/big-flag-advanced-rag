@@ -22,6 +22,7 @@ INFRA_COMPOSE="docker compose -f infra/docker-compose.yml"
 
 rebuild_backend=false
 rebuild_frontend=false
+recreate_nginx=false   # infra/ (compose hoặc nginx conf) đổi → recreate nginx để nạp lại
 
 if [[ $# -gt 0 ]]; then
   # Chế độ ép tay: dùng service truyền vào.
@@ -29,7 +30,8 @@ if [[ $# -gt 0 ]]; then
     case "$svc" in
       backend)  rebuild_backend=true ;;
       frontend) rebuild_frontend=true ;;
-      *) echo "!! service không hợp lệ: $svc (chỉ backend|frontend)"; exit 2 ;;
+      nginx)    recreate_nginx=true ;;
+      *) echo "!! service không hợp lệ: $svc (chỉ backend|frontend|nginx)"; exit 2 ;;
     esac
   done
 else
@@ -40,6 +42,7 @@ else
     echo ">> Không có commit gốc để so sánh — rebuild cả backend lẫn frontend."
     rebuild_backend=true
     rebuild_frontend=true
+    recreate_nginx=true
   else
     changed="$(git diff --name-only "$before" "$after" || true)"
     echo ">> Files đổi giữa ${before:0:7}..${after:0:7}:"
@@ -48,6 +51,8 @@ else
     grep -qE '^frontend/'         <<<"$changed" && rebuild_frontend=true || true
     # Đổi compose app hoặc .env → rebuild cả hai cho chắc.
     grep -qE '^(docker-compose\.yml|\.env)' <<<"$changed" && { rebuild_backend=true; rebuild_frontend=true; } || true
+    # Đổi infra/ (compose infra hoặc nginx conf) → recreate nginx để nạp cert/route mới.
+    grep -qE '^infra/'            <<<"$changed" && recreate_nginx=true || true
   fi
 fi
 
@@ -55,6 +60,13 @@ fi
 # mlflow image; chỉ đảm bảo các service infra đang chạy.
 echo ">> Đảm bảo infra stack đang chạy…"
 $INFRA_COMPOSE up -d
+
+# nginx bind-mount app.conf: đổi conf không tự recreate; ép recreate để nạp lại config
+# (đủ cho cả đổi compose lẫn đổi cert path/route).
+if $recreate_nginx; then
+  echo ">> Infra đổi — recreate nginx…"
+  $INFRA_COMPOSE up -d --force-recreate nginx
+fi
 
 services=()
 $rebuild_backend  && services+=(backend retrieval-mcp) || true
@@ -72,10 +84,11 @@ fi
 # Dọn image cũ (dangling) để VM khỏi đầy đĩa qua nhiều lần deploy.
 docker image prune -f >/dev/null 2>&1 || true
 
-# Health check qua nginx (đường vào duy nhất trên :80). Backend expose /api/health.
-echo ">> Health check http://localhost/api/health …"
+# Health check qua nginx. big-rag.dev ép HTTPS (HTTP :80 -> 301), nên gọi thẳng HTTPS;
+# -k vì SNI 'localhost' không khớp CN big-rag.dev (cùng 1 server block 443).
+echo ">> Health check https://localhost/api/health …"
 for i in $(seq 1 30); do
-  if curl -fsS -o /dev/null http://localhost/api/health; then
+  if curl -fsSk -o /dev/null https://localhost/api/health; then
     echo ">> OK — deploy xong."
     exit 0
   fi
