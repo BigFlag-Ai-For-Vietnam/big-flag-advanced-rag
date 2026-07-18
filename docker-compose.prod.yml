@@ -1,0 +1,13 @@
+# Override CHỈ dùng khi DEPLOY trên VM (scripts/deploy.sh gọi kèm `-f docker-compose.prod.yml`).
+# KHÔNG auto-load ở local: tên khác `docker-compose.override.yml` nên `docker compose` mặc
+# định chỉ đọc `docker-compose.yml` (dev, localhost:8000). Nhờ vậy dev và prod không đụng nhau.
+#
+# Trên VM app đứng sau nginx của stack infra/ (serve frontend + proxy /api -> backend). Trình
+# duyệt phải gọi API CÙNG ORIGIN (big-rag.dev) bằng path tương đối, KHÔNG phải localhost:8000
+# của máy khách. client.ts: `import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"` —
+# đặt "" để fetch("/api/...") đi qua nginx same-origin (`??` chỉ fallback khi null/undefined,
+# nên chuỗi rỗng được giữ nguyên).
+services:
+  frontend:
+    environment:
+      VITE_API_BASE_URL: ""

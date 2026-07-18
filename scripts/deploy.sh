@@ -17,7 +17,10 @@ set -euo pipefail
 # Chạy từ gốc repo dù được gọi ở đâu.
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose"
+# App stack khi DEPLOY = base (dev) + prod override. Prod file đặt VITE_API_BASE_URL="" để
+# FE gọi API same-origin qua nginx (xem docker-compose.prod.yml). Local dev KHÔNG dùng file
+# này (chạy `docker compose` trần -> chỉ base, localhost:8000).
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 INFRA_COMPOSE="docker compose -f infra/docker-compose.yml"
 
 rebuild_backend=false
@@ -49,8 +52,8 @@ else
     echo "$changed" | sed 's/^/     /'
     grep -qE '^backend/'          <<<"$changed" && rebuild_backend=true  || true
     grep -qE '^frontend/'         <<<"$changed" && rebuild_frontend=true || true
-    # Đổi compose app hoặc .env → rebuild cả hai cho chắc.
-    grep -qE '^(docker-compose\.yml|\.env)' <<<"$changed" && { rebuild_backend=true; rebuild_frontend=true; } || true
+    # Đổi compose app (base hoặc prod override) hoặc .env → rebuild cả hai cho chắc.
+    grep -qE '^(docker-compose\.(yml|prod\.yml)|\.env)' <<<"$changed" && { rebuild_backend=true; rebuild_frontend=true; } || true
     # Đổi infra/ (compose infra hoặc nginx conf) → recreate nginx để nạp cert/route mới.
     grep -qE '^infra/'            <<<"$changed" && recreate_nginx=true || true
   fi
