@@ -53,7 +53,7 @@ def test_raw_pipeline_is_dense_only_and_streams(monkeypatch):
     async def fake_stream(messages, **kwargs):
         assert "CÂU HỎI: câu hỏi" in messages[1]["content"]
         assert kwargs["temperature"] == 0.2
-        assert kwargs["max_tokens"] == 1024
+        assert kwargs["max_tokens"] == 4096
         yield "câu "
         yield "trả lời"
 
@@ -105,7 +105,8 @@ def test_advanced_pipeline_exposes_trace_and_coverage(monkeypatch):
     async def fake_retrieve(question, top_k, **_kwargs):
         return result
 
-    async def fake_stream(_messages, **_kwargs):
+    async def fake_stream(_messages, **kwargs):
+        assert kwargs["max_tokens"] == 4096
         yield "answer"
 
     class FakeSession:

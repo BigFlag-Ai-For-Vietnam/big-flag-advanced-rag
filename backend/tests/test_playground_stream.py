@@ -24,7 +24,8 @@ def test_stream_orders_progress_before_context_and_tokens(monkeypatch):
         await progress({"stage": "plan", "status": "completed", "label": "Đã lập kế hoạch"})
         return [citation], [], []
 
-    async def fake_stream(_messages, **_kwargs):
+    async def fake_stream(_messages, **kwargs):
+        assert kwargs["max_tokens"] == 4096
         yield "xin "
         yield "chào"
 
@@ -54,7 +55,8 @@ def test_mcp_stream_generates_answer_after_retrieval(monkeypatch):
             rewritten_question="q rewrite", tool_calls=[], subgoals=[],
         )
 
-    async def fake_stream(_messages, **_kwargs):
+    async def fake_stream(_messages, **kwargs):
+        assert kwargs["max_tokens"] == 4096
         yield "câu "
         yield "trả lời"
 

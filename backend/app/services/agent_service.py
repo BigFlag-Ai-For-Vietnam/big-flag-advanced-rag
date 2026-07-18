@@ -110,7 +110,7 @@ def _build_llm():
         is_chat_model=True,
         is_function_calling_model=False,  # ép ReActAgent dùng ReAct dạng text
         temperature=0.2,
-        max_tokens=1024,
+        max_tokens=4096,
         context_window=32000,
         timeout=settings.llm_timeout,
         additional_kwargs=additional_kwargs,
