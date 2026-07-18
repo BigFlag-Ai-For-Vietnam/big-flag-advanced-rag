@@ -1,4 +1,40 @@
--r requirements.txt
+# Self-contained eval environment (Silver-dataset generation + RAGAS judge).
+#
+# WHY THIS IS SEPARATE (do NOT `-r requirements.txt` here):
+#   ragas 0.4.3 hard-depends on the OLD langchain-community line (0.3.x), whose code imports
+#   modules (e.g. langchain_community.chat_models.vertexai) that require langchain-core < 0.3.12.
+#   The app's Retrieval Engine pins langchain-core == 1.4.9 (langgraph 1.2.9). Those two
+#   langchain-core majors cannot coexist in one interpreter, so eval gets its own venv.
+#   (Verified: `import ragas` raises ModuleNotFoundError under langchain-community 0.4.x.)
+#
+# WHAT'S INCLUDED: only the app runtime deps that `eval/` + the indexing pipeline actually
+#   import (config, db, llm_client, parsing/chunking/embedding/qdrant/storage), plus ragas.
+#   NOT included: fastapi/uvicorn (serve backend), langgraph/langchain-core 1.4.9/mcp/rank-bm25
+#   (Retrieval Engine — only the live query/judge path needs it). The indexing pipeline itself
+#   is langgraph-free, so this env can both index the corpus and run `python -m eval dataset generate`.
+#
+# INSTALL INTO A DEDICATED VENV, e.g.:
+#   uv venv --python 3.12.7 .venv-eval && uv pip install --python .venv-eval/bin/python -r requirements-eval.txt
+#
+# ragas 0.4.3 pulls its native stack: langchain 0.3.x / langchain-core 0.3.x /
+# langchain-community 0.3.x / langchain-openai 0.3.x (left unpinned so the resolver keeps them
+# mutually consistent). App pins below (openai, sqlalchemy, pydantic-settings, ...) are kept
+# identical to requirements.txt and remain compatible with that langchain 0.3.x line.
+
+# --- app runtime deps needed by eval/ (config, db, llm_client) + the indexing pipeline ---
+sqlalchemy==2.0.36
+pydantic==2.11.7
+pydantic-settings==2.7.1
+pdfplumber==0.11.5
+pillow==11.1.0
+qdrant-client==1.12.2
+boto3==1.35.71
+llama-index-core==0.12.10
+llama-index-llms-openai-like>=0.3,<0.5
+openai==1.87.0
+httpx==0.28.1
+
+# --- eval stack (RAGAS + MLflow); ragas pulls the compatible langchain 0.3.x line ---
 ragas==0.4.3
 mlflow==3.14.0
 rapidfuzz==3.14.5

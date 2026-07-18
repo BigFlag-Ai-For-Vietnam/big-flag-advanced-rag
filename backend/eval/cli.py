@@ -254,23 +254,20 @@ def cmd_judge(args: argparse.Namespace) -> int:
         return 1
     logger.info("Đã tạo %d trace RAG.", len(traces))
 
-    from ragas.embeddings import OpenAIEmbeddings
     from mlflow.genai.scorers.ragas import (
-        AnswerRelevancy,
+        AnswerAccuracy,
         ContextPrecision,
         ContextRecall,
-        FactualCorrectness,
-        Faithfulness,
     )
 
     judge_uri = f"openai:/{settings.eval_judge_model or settings.fpt_chat_model}"
-    embeddings = OpenAIEmbeddings(client=make_openai_client(async_client=True), model=settings.fpt_embed_model)
+    # Bỏ Faithfulness + FactualCorrectness (GLM-judge trả rỗng/parse lỗi lác đác). AnswerAccuracy
+    # = LLM so khớp câu trả lời với đáp án chuẩn (reference), KHÔNG dùng embedding — thay cho
+    # AnswerRelevancy (vốn cần embedding). Giữ ContextPrecision/Recall cho chất lượng retrieval.
     scorers = [
-        Faithfulness(model=judge_uri),
-        AnswerRelevancy(model=judge_uri, embeddings=embeddings),
+        AnswerAccuracy(model=judge_uri),
         ContextPrecision(model=judge_uri),
         ContextRecall(model=judge_uri),
-        FactualCorrectness(model=judge_uri),
     ]
 
     # Tắt thinking cho judge (spike A2): GLM reasoning trả content rỗng/verdict trôi kiểu
@@ -282,12 +279,14 @@ def cmd_judge(args: argparse.Namespace) -> int:
 
     judge_llm = build_judge_llm(async_client=True)
     for scorer in scorers:
-        if getattr(scorer._metric, "llm", None) is not None:
-            scorer._metric.llm = judge_llm
-        if scorer._llm is not None:
+        # Chỉ ragas scorer có `_metric`/`_llm`; scorer custom (answer_relevance) thì bỏ qua.
+        metric = getattr(scorer, "_metric", None)
+        if metric is not None and getattr(metric, "llm", None) is not None:
+            metric.llm = judge_llm
+        if getattr(scorer, "_llm", None) is not None:
             scorer._llm = judge_llm
 
-    logger.info("Giai đoạn 2/3: chấm điểm %d trace bằng mlflow.genai.evaluate() (5 scorer ragas, judge %s)...", len(traces), judge_uri)
+    logger.info("Giai đoạn 2/3: chấm điểm %d trace bằng mlflow.genai.evaluate() (3 scorer: AnswerAccuracy + ContextPrecision + ContextRecall, judge %s)...", len(traces), judge_uri)
     result = mlflow.genai.evaluate(data=traces, scorers=scorers)
     logger.info("Chấm điểm xong — run_id=%s", result.run_id)
 
