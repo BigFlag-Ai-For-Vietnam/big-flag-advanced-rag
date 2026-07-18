@@ -8,7 +8,7 @@ from app.db import init_db
 from app.retrieval.mcp import client as retrieval_client
 from app.routers import catalog, documents, playground
 from app.routers import eval as eval_router
-from app.services import tracing
+from app.services import graph_service, tracing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -42,6 +42,7 @@ async def _startup():
 @app.on_event("shutdown")
 async def _shutdown():
     await retrieval_client.close()
+    graph_service.close_driver()
 
 
 @app.get("/api/health")

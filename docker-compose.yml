@@ -17,6 +17,7 @@ services:
       DATA_DIR: /data
       RETRIEVAL_MCP_URL: http://retrieval-mcp:8100/mcp
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      NEO4J_URI: bolt://neo4j:7687
     volumes:
       # bind mount: db + PDF gốc + ảnh page nằm trực tiếp trong ./backend/data trên host
       - ./backend/data:/data
@@ -35,14 +36,21 @@ services:
     env_file:
       - .env
     environment:
-      # override cho môi trường container (qdrant reachable qua service name)
+      # override cho môi trường container (qdrant/neo4j reachable qua service name) — BUG
+      # đã fix: service này thiếu hẳn `networks:` dù set các URL này, nên trước đây KHÔNG
+      # resolve được qdrant/neo4j theo service name (chỉ hoạt động "tình cờ" nếu Docker
+      # default bridge network trùng tên, không đảm bảo) — xem CLAUDE.md "Graph boundary".
       QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
       # tool query_catalog đọc catalog document-level từ SQLite (read-only). Mount cùng
       # file DB với backend (backend ghi, mcp chỉ đọc) — xem volume ./backend/data bên dưới.
       DB_URL: sqlite:////data/rag.db
       DATA_DIR: /data
     volumes:
       - ./backend/data:/data
+    networks:
+      - default
+      - infra
   frontend:
     build: ./frontend
     # KHÔNG publish 5173: nginx (stack infra/) serve frontend trên 80/443 và proxy

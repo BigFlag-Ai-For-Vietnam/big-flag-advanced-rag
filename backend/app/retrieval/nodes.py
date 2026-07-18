@@ -79,10 +79,18 @@ PLAN_PROMPT = (
 ASSESS_PROMPT = (
     "Bạn là bộ KIỂM TRA ĐỘ ĐẦY ĐỦ bằng chứng cho retrieval. Với mỗi SUB-GOAL và các đoạn "
     "bằng chứng tìm được, quyết định có nên TÌM THÊM không.\n"
-    "- satisfied=true nếu các đoạn ĐÃ CHỨA thông tin để trả lời phần lớn sub-goal (không cần "
-    "hoàn hảo, không cần mọi chi tiết) — kể cả khi thông tin nằm trong bảng/con số.\n"
-    "- satisfied=false CHỈ khi các đoạn hầu như KHÔNG liên quan hoặc thiếu hẳn thông tin cốt "
-    "lõi. Khi false, note nêu ngắn gọn còn thiếu gì để lần tìm sau nhắm đúng.\n"
+    "Có 2 LOẠI bằng chứng, dùng khác nhau: "
+    "(1) BẰNG CHỨNG VĂN BẢN (chunk) — trích y nguyên từ tài liệu, dùng để trả lời trực tiếp; "
+    "(2) BẰNG CHỨNG ĐỒ THỊ (graph) — quan hệ/thực thể giữa các văn bản (căn cứ/thay thế/tham "
+    "chiếu/ưu tiên hơn) hoặc bundle nhiều giá trị cho cùng 1 khái niệm kèm văn bản nguồn — "
+    "KHÔNG phải trích dẫn nguyên văn, chỉ dùng để PHÁT HIỆN quan hệ/xung đột/thay thế giữa "
+    "nhiều văn bản (vd 2 văn bản cùng quy định 1 giá trị khác nhau -> có thể xung đột hoặc 1 "
+    "văn bản đã thay thế văn bản kia).\n"
+    "- satisfied=true nếu ĐÃ CÓ ĐỦ 1 trong 2 loại bằng chứng để trả lời phần lớn sub-goal "
+    "(không cần hoàn hảo, không cần mọi chi tiết) — kể cả khi thông tin nằm trong bảng/con số "
+    "hoặc chỉ có bằng chứng đồ thị (câu hỏi về quan hệ/so sánh giữa văn bản).\n"
+    "- satisfied=false CHỈ khi CẢ 2 loại đều hầu như KHÔNG liên quan hoặc thiếu hẳn thông tin "
+    "cốt lõi. Khi false, note nêu ngắn gọn còn thiếu gì để lần tìm sau nhắm đúng.\n"
     "Ưu tiên dừng (true) khi đã đủ dùng — tránh tìm lặp vô ích.\n"
     "CHỈ trả về JSON đúng schema, không giải thích: "
     '{"results":[{"id":"<id>","satisfied":true,"note":"..."}]}'
@@ -149,6 +157,17 @@ def _evidence_snippet(chunk: dict, limit: int = 500) -> str:
     return txt[:limit]
 
 
+def _graph_fact_snippet(fact: dict) -> str:
+    props = fact.get("properties") or {}
+    prop_txt = f" ({props})" if props else ""
+    source_doc = fact.get("source_document_title") or ""
+    return (
+        f"{fact.get('source_entity', '')} --{fact.get('relation', '')}--> "
+        f"{fact.get('target_entity', '')}{prop_txt}"
+        + (f" [nguồn: {source_doc}]" if source_doc else "")
+    )
+
+
 def assess(subgoals: list[dict]) -> list[dict]:
     """Đánh giá mỗi sub-goal đã đủ bằng chứng chưa (LLM judge, 1 call).
 
@@ -168,7 +187,13 @@ def assess(subgoals: list[dict]) -> list[dict]:
     for sg in subgoals:
         ev = sg.get("evidence", [])[:6]
         ev_txt = "\n".join(f"  - {_evidence_snippet(e)}" for e in ev) or "  (chưa có bằng chứng)"
-        blocks.append(f"[{sg['id']}] {sg['description']}\nBằng chứng:\n{ev_txt}")
+        graph_ev = sg.get("graph_evidence", [])[:6]
+        graph_txt = "\n".join(f"  - {_graph_fact_snippet(f)}" for f in graph_ev) or "  (chưa có bằng chứng đồ thị)"
+        blocks.append(
+            f"[{sg['id']}] {sg['description']}\n"
+            f"Bằng chứng văn bản:\n{ev_txt}\n"
+            f"Bằng chứng đồ thị:\n{graph_txt}"
+        )
     user = "\n\n".join(blocks)
     try:
         raw = llm_client.chat(

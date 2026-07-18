@@ -111,13 +111,13 @@ def test_chunk_and_page_builders_carry_text_and_rules():
 
 
 def test_resolve_custom_overrides_preset():
-    out = resolve_focus_entities("the_tin_dung", ["Chỉ facet này"])
+    out = resolve_focus_entities("van_ban_tuan_thu", ["Chỉ facet này"])
     assert out == ["Chỉ facet này"]
 
 
 def test_resolve_preset_by_category():
-    out = resolve_focus_entities("bao_hiem", None)
-    assert out == CATALOG_PRESETS["bao_hiem"]["entities"]
+    out = resolve_focus_entities("van_ban_tuan_thu", None)
+    assert out == CATALOG_PRESETS["van_ban_tuan_thu"]["entities"]
 
 
 def test_compliance_preset_covers_ground_truth_entities():
@@ -163,7 +163,7 @@ def test_resolve_default_when_unknown_category():
 def test_list_presets_shape():
     presets = list_presets()
     keys = {p["key"] for p in presets}
-    assert {"van_ban_tuan_thu", "the_tin_dung", "bao_hiem", "quy_trinh", "khac"} <= keys
+    assert {"van_ban_tuan_thu", "quy_trinh", "khac"} <= keys
     for p in presets:
         assert p["label"] and isinstance(p["entities"], list)
 

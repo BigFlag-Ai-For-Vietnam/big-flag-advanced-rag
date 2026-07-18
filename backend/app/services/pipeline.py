@@ -10,11 +10,12 @@ import uuid
 from app.catalog_presets import resolve_focus_entities
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Chunk, Document, DocumentStatus, Page
+from app.models import Chunk, Document, DocumentStatus, GraphStatus, Page
 from app.services import (
     catalog_service,
     chunking_service,
     embedding_service,
+    graph_service,
     parsing_service,
     qdrant_service,
     storage_service,
@@ -99,6 +100,18 @@ def run_pipeline(document_id: str) -> None:
             chunk_rows.append(row)
         db.commit()
 
+        # --- Knowledge Graph build (Neo4j via LightRAG) — chạy NỀN, KHÔNG chặn catalog/Stage C.
+        # Tách trạng thái riêng (graph_status) khỏi DocumentStatus: DocumentStatus.indexed vẫn
+        # là tín hiệu DUY NHẤT "chunk-RAG dùng được", không phụ thuộc graph build xong hay chưa.
+        if settings.kg_enable_build and document.category in settings.kg_categories:
+            from app.services.kg import build_service as kg_build_service  # lazy: import nặng (lightrag)
+
+            document.graph_status = GraphStatus.building
+            db.commit()
+            kg_build_service.submit_graph_build(
+                document.id, document.title, [cd["final_content"] for cd in chunk_dicts]
+            )
+
         # Catalog document-level (cây entities — chỉ TÊN mục, không có giá trị).
         # Nguồn: "chunks" (final_content đã contextual — mảnh self-contained nhờ câu định vị,
         # gán facet đúng kể cả khi section kéo dài qua nhiều trang / trang không header) hoặc
@@ -156,10 +169,22 @@ def run_pipeline(document_id: str) -> None:
 
 
 def _reset_document(db, document: Document) -> None:
-    """Xoá pages/chunks cũ + Qdrant points để reprocess sạch."""
+    """Xoá pages/chunks cũ + Qdrant points + graph nodes để reprocess sạch."""
     if document.status == DocumentStatus.uploaded and not document.pages and not document.chunks:
         return
     qdrant_service.delete_by_document(document.id)
+    if document.graph_status == GraphStatus.building:
+        # Graph-build cũ còn đang chạy nền (thread khác, ngoài vòng đời request này) — xoá
+        # giữa chừng có thể corrupt state đang ghi dở. Bỏ qua lần này; graph_status sẽ được
+        # reset đúng ở lần reprocess SAU, khi build cũ đã xong (ready|failed).
+        logger.warning("Document %s đang graph-build dở — bỏ qua xoá graph lần này", document.id)
+    else:
+        # document.title không unique (2 lần upload cùng tên file) -> graph_service ưu tiên
+        # xoá theo document_id (đã stamp bởi build_service), chỉ fallback title cho data cũ
+        # chưa được stamp — tránh xoá nhầm graph của 1 document khác trùng title.
+        graph_service.delete_by_document(document.id, document.title)
+        document.graph_status = None
+        document.graph_error_message = None
     db.query(Page).filter(Page.document_id == document.id).delete()
     db.query(Chunk).filter(Chunk.document_id == document.id).delete()
     document.error_message = None

@@ -19,6 +19,17 @@ class DocumentStatus(str, enum.Enum):
     failed = "failed"
 
 
+class GraphStatus(str, enum.Enum):
+    """Trạng thái build knowledge graph (Neo4j) — tách biệt khỏi DocumentStatus vì graph-build
+    chạy nền song song với Qdrant indexing: DocumentStatus.indexed phải là tín hiệu DUY NHẤT
+    "chunk-RAG dùng được", không phụ thuộc graph đã xong hay chưa."""
+
+    not_built = "not_built"
+    building = "building"
+    ready = "ready"
+    failed = "failed"
+
+
 def _uuid() -> str:
     return str(uuid.uuid4())
 
@@ -44,7 +55,7 @@ class Document(Base):
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # --- Catalog metadata (cây entities "lean": chỉ tên mục, không có data) ---
-    # category preset user chọn lúc upload (vd "the_tin_dung", "bao_hiem")
+    # category preset user chọn lúc upload (vd "van_ban_tuan_thu", "quy_trinh")
     category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # danh sách facet-entities LLM cần focus khi sinh catalog (preset đã resolve/customize)
     focus_entities: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -63,6 +74,9 @@ class Document(Base):
     supersedes_id: Mapped[str | None] = mapped_column(String(36), nullable=True)      # bản này thay thế ai
     superseded_by_id: Mapped[str | None] = mapped_column(String(36), nullable=True)   # ai thay thế bản này
     supersession_note: Mapped[str | None] = mapped_column(Text, nullable=True)        # vd "giữ hiệu lực Phụ lục 02"
+    # --- Knowledge Graph build (Neo4j via LightRAG) — độc lập với `status` ở trên ---
+    graph_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    graph_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

@@ -1,4 +1,4 @@
-"""Tool cho react subgraph: query_vector_store (thật) + query_graph_knowledge (stub).
+"""Tool cho react subgraph: query_vector_store (chunk) + query_graph_knowledge (Neo4j).
 
 Mỗi tool log input/output gọn qua logger.info để quan sát được từng bước ReAct loop
 làm gì (không log nguyên final_content dài, tránh spam log).
@@ -10,7 +10,7 @@ import logging
 from langchain_core.tools import tool
 
 from app.config import settings
-from app.services import embedding_service, qdrant_service
+from app.services import embedding_service, graph_service, qdrant_service
 
 logger = logging.getLogger("retrieval.tools")
 
@@ -96,12 +96,16 @@ def query_catalog(query: str, top_k: int = 5) -> list[dict]:
 
 @tool
 def query_graph_knowledge(query: str) -> list[dict]:
-    """Tra cứu tri thức dạng quan hệ/thực thể (graph) giữa các sản phẩm/điều khoản/dịch vụ.
-
-    CHƯA có dữ liệu graph thật (Ingestion chưa có bước sinh graph) — hiện luôn trả về
-    rỗng. Vẫn có thể gọi thử nếu câu hỏi có vẻ cần quan hệ giữa nhiều thực thể.
+    """Tra cứu tri thức dạng quan hệ/thực thể (graph) giữa các văn bản/khái niệm/giá trị quy
+    định — dùng để phát hiện quan hệ căn cứ/thay thế/tham chiếu giữa văn bản, hoặc để lộ ra
+    nhiều giá trị khác nhau (có thể mâu thuẫn) cho CÙNG 1 khái niệm kèm văn bản nguồn.
+    KHÔNG phải trích dẫn nguyên văn — dùng để suy luận quan hệ/xung đột/thay thế, không dùng
+    để trả lời trực tiếp câu hỏi tra cứu nội dung cụ thể (đó là việc của query_vector_store).
     """
-    logger.info("[query_graph_knowledge] input query=%r (stub — chờ Ingestion sinh graph)", query)
-    results: list[dict] = []
-    logger.info("[query_graph_knowledge] output hits=0 (stub)")
+    logger.info("[query_graph_knowledge] input query=%r", query)
+    if not settings.retrieval_enable_graph or not graph_service.is_configured():
+        logger.info("[query_graph_knowledge] output hits=0 (graph tắt hoặc Neo4j chưa cấu hình)")
+        return []
+    results = graph_service.concept_matches(query, settings.retrieval_graph_concept_top_k)
+    logger.info("[query_graph_knowledge] output hits=%s", len(results))
     return results

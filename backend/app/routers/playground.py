@@ -29,6 +29,7 @@ from app.retrieval.mcp import client as retrieval_client
 from app.schemas.playground import (
     CatalogInfo,
     Citation,
+    GraphFact,
     McpRetrieveConfig,
     McpRetrieveRequest,
     McpRetrieveResponse,
@@ -45,6 +46,10 @@ SYSTEM_PROMPT = (
     "Bạn là trợ lý hỏi–đáp dựa trên tài liệu. Chỉ trả lời dựa vào NGỮ CẢNH được cung cấp. "
     "CATALOG là bản đồ mục lục của tài liệu (chỉ tên mục, không có giá trị) — dùng để trả "
     "lời ĐẦY ĐỦ, đặc biệt câu hỏi liệt kê (đối chiếu catalog xem đã đủ mục chưa). "
+    "TRI THỨC ĐỒ THỊ (nếu có) là quan hệ giữa văn bản/khái niệm (căn cứ/thay thế/tham chiếu/"
+    "ưu tiên hơn, hoặc nhiều giá trị khác nhau cho cùng 1 khái niệm) — dùng để SUY LUẬN quan "
+    "hệ/xung đột/thay thế xuyên văn bản, KHÔNG phải trích dẫn nguyên văn; trích dẫn [số] vẫn "
+    "chỉ trỏ vào NGỮ CẢNH (đoạn văn bản), không trỏ vào tri thức đồ thị. "
     "Nếu ngữ cảnh không đủ thông tin, hãy nói rõ là không tìm thấy trong tài liệu. "
     "Trả lời bằng tiếng Việt, trích dẫn nguồn theo dạng [số] khi phù hợp."
 )
@@ -52,9 +57,11 @@ SYSTEM_PROMPT = (
 
 # ------------------------- retrieval -------------------------
 
-async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[SubgoalCoverage]]:
-    """Gọi Retrieval Engine (agentic planning) qua MCP → citations + coverage từng sub-goal.
-    Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning)."""
+async def _retrieve(
+    question: str, top_k: int
+) -> tuple[list[Citation], list[GraphFact], list[SubgoalCoverage]]:
+    """Gọi Retrieval Engine (agentic planning) qua MCP → citations + graph_facts + coverage
+    từng sub-goal. Nếu lỗi -> fallback retrieve thẳng Qdrant (không planning, không graph)."""
     with tracing.span(
         "retrieve",
         span_type=tracing.RETRIEVER,
@@ -62,16 +69,21 @@ async def _retrieve(question: str, top_k: int) -> tuple[list[Citation], list[Sub
     ) as span:
         try:
             result = await retrieval_client.retrieve(question, top_k)
-            citations, subgoals = result.citations, result.subgoals
+            citations, graph_facts, subgoals = result.citations, result.graph_facts, result.subgoals
             fallback = False
         except Exception as exc:  # noqa: BLE001 — MCP down/lỗi -> fallback
             logger.warning("Retrieval Engine (MCP) lỗi, fallback Qdrant trực tiếp: %s", exc)
-            citations, subgoals, fallback = _simple_retrieve(question, top_k), [], True
+            citations, graph_facts, subgoals, fallback = _simple_retrieve(question, top_k), [], [], True
         tracing.set_outputs(
             span,
-            {"num_citations": len(citations), "num_subgoals": len(subgoals), "fallback": fallback},
+            {
+                "num_citations": len(citations),
+                "num_graph_facts": len(graph_facts),
+                "num_subgoals": len(subgoals),
+                "fallback": fallback,
+            },
         )
-        return citations, subgoals
+        return citations, graph_facts, subgoals
 
 
 def _simple_retrieve(question: str, top_k: int) -> list[Citation]:
@@ -108,11 +120,21 @@ def _fetch_catalogs(db: Session, citations: list[Citation]) -> list[CatalogInfo]
 
 # ------------------------- answer -------------------------
 
+def _format_graph_facts(graph_facts: list[GraphFact]) -> str:
+    lines = []
+    for f in graph_facts:
+        prop_txt = f" ({f.properties})" if f.properties else ""
+        source_txt = f" [nguồn: {f.source_document_title}]" if f.source_document_title else ""
+        lines.append(f"- {f.source_entity} --{f.relation}--> {f.target_entity}{prop_txt}{source_txt}")
+    return "\n".join(lines)
+
+
 def _build_messages(
     question: str,
     citations: list[Citation],
     catalogs: list[CatalogInfo],
     subgoals: list[SubgoalCoverage],
+    graph_facts: list[GraphFact],
 ) -> list[dict]:
     blocks = [
         f"[{i + 1}] (Tài liệu: {c.title}, đoạn #{c.chunk_index})\n{c.final_content}"
@@ -122,12 +144,18 @@ def _build_messages(
     catalog_text = "\n\n".join(
         catalog_service.format_catalog_text(c.title, c.catalog) for c in catalogs
     ).strip()
+    graph_text = _format_graph_facts(graph_facts)
     # Các sub-goal chưa đủ bằng chứng -> yêu cầu LLM nêu rõ phần còn thiếu thay vì bịa.
     missing = [f"- {s.description}: {s.note or 'chưa đủ bằng chứng'}" for s in subgoals if not s.satisfied]
 
     parts = [f"NGỮ CẢNH:\n{context}"]
     if catalog_text:
         parts.append(f"CATALOG:\n{catalog_text}")
+    if graph_text:
+        parts.append(
+            "TRI THỨC ĐỒ THỊ (quan hệ giữa văn bản/khái niệm — KHÔNG phải trích dẫn nguyên văn):\n"
+            + graph_text
+        )
     if missing:
         parts.append("PHẦN CÒN THIẾU BẰNG CHỨNG (nêu rõ trong câu trả lời, KHÔNG bịa):\n" + "\n".join(missing))
     parts.append(f"CÂU HỎI: {question}")
@@ -157,22 +185,23 @@ async def query(req: QueryRequest, db: Session = Depends(get_db)):
         inputs={"question": req.question},
         attributes={"top_k": req.top_k, "stream": False},
     ) as root:
-        citations, coverage = await _retrieve(req.question, req.top_k)
+        citations, graph_facts, coverage = await _retrieve(req.question, req.top_k)
         catalogs = _fetch_catalogs(db, citations)
         with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
             answer = llm_client.chat(
-                _build_messages(req.question, citations, catalogs, coverage),
+                _build_messages(req.question, citations, catalogs, coverage, graph_facts),
                 temperature=0.2, max_tokens=1024, tag="qa",
             )
             tracing.set_outputs(gen, {"answer_chars": len(answer)})
         tracing.set_outputs(
-            root, {"answer_chars": len(answer), "num_citations": len(citations)}
+            root,
+            {"answer_chars": len(answer), "num_citations": len(citations), "num_graph_facts": len(graph_facts)},
         )
-        return QueryResponse(answer=answer, citations=citations, catalogs=catalogs)
+        return QueryResponse(answer=answer, citations=citations, catalogs=catalogs, graph_facts=graph_facts)
 
 
 async def _stream_query(db: Session, req: QueryRequest):
-    """SSE: gửi catalogs + citations trước, rồi stream token, kết thúc [DONE]."""
+    """SSE: gửi catalogs + citations + graph_facts trước, rồi stream token, kết thúc [DONE]."""
     with tracing.span(
         "playground_query",
         span_type=tracing.CHAIN,
@@ -180,21 +209,22 @@ async def _stream_query(db: Session, req: QueryRequest):
         attributes={"top_k": req.top_k, "stream": True},
     ) as root:
         try:
-            citations, coverage = await _retrieve(req.question, req.top_k)
+            citations, graph_facts, coverage = await _retrieve(req.question, req.top_k)
             catalogs = _fetch_catalogs(db, citations)
             yield _sse({"type": "catalogs", "catalogs": [c.model_dump() for c in catalogs]})
             yield _sse({"type": "citations", "citations": [c.model_dump() for c in citations]})
+            yield _sse({"type": "graph_facts", "graph_facts": [f.model_dump() for f in graph_facts]})
             yield _sse({"type": "coverage", "subgoals": [s.model_dump() for s in coverage]})
             with tracing.span("generate_answer", span_type=tracing.LLM) as gen:
                 token_count = 0
                 for delta in llm_client.chat_stream(
-                    _build_messages(req.question, citations, catalogs, coverage),
+                    _build_messages(req.question, citations, catalogs, coverage, graph_facts),
                     temperature=0.2, max_tokens=1024, tag="qa_stream",
                 ):
                     token_count += 1
                     yield _sse({"type": "token", "content": delta})
                 tracing.set_outputs(gen, {"token_deltas": token_count})
-            tracing.set_outputs(root, {"num_citations": len(citations)})
+            tracing.set_outputs(root, {"num_citations": len(citations), "num_graph_facts": len(graph_facts)})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Stream lỗi")
             yield _sse({"type": "error", "message": str(exc)})
@@ -215,6 +245,7 @@ async def mcp_retrieve(req: McpRetrieveRequest):
     )
     return McpRetrieveResponse(
         citations=result.citations,
+        graph_facts=result.graph_facts,
         normalized_question=result.normalized_question,
         rewritten_question=result.rewritten_question,
         tool_calls=result.tool_calls,

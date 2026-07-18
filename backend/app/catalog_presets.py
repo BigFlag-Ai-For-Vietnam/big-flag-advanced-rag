@@ -1,12 +1,12 @@
 """Preset facet-entities theo category tài liệu.
 
-Ý tưởng: mỗi category (Thẻ tín dụng / Bảo hiểm / Quy trình…) có sẵn danh sách
+Ý tưởng: mỗi category (Tuân thủ / Pháp lý / Quy trình…) có sẵn danh sách
 "facet-entities" — các trục thông tin mà LLM cần focus khi sinh CATALOG cho tài liệu.
 User chọn category lúc upload để prefill, và được phép customize (thêm/bớt) danh sách này.
 
-Danh sách dưới đây rút ra từ chính các tài liệu mẫu trong `backend/docs`
-(Thẻ tín dụng Sung Túc / SHBFinance, Bảo hiểm Family, Bảo hiểm Bảo Tâm An + TASCO)
-và bộ văn bản tuân thủ mô phỏng trong `sample_compliance_corpus/`.
+Tập trung vào domain văn bản tuân thủ/pháp lý (xem `sample_compliance_corpus/` +
+`GROUND_TRUTH.md`) — đã bỏ hẳn 2 preset thẻ tín dụng/bảo hiểm của bản PoC biểu phí trước đó
+(không còn phù hợp hướng đi hiện tại).
 """
 from __future__ import annotations
 
@@ -30,32 +30,6 @@ CATALOG_PRESETS: dict[str, dict] = {
             "Thời hạn lưu trữ",
             "Ngoại lệ, quy tắc ưu tiên & xung đột",
             "Chế tài & xử phạt",
-        ],
-    },
-    "the_tin_dung": {
-        "label": "Thẻ tín dụng",
-        "entities": [
-            "Định nghĩa & thuật ngữ",
-            "Các loại phí",
-            "Hạn mức (tín dụng, giao dịch, rút tiền)",
-            "Lãi suất, kỳ sao kê & thanh toán",
-            "Quyền lợi & ưu đãi",
-            "Quyền & nghĩa vụ của chủ thẻ",
-            "Điều kiện phát hành & sử dụng",
-            "An toàn, bảo mật & xử lý tranh chấp",
-        ],
-    },
-    "bao_hiem": {
-        "label": "Bảo hiểm",
-        "entities": [
-            "Đối tượng & điều kiện tham gia",
-            "Phạm vi bảo hiểm",
-            "Quyền lợi bảo hiểm (chính & bổ sung)",
-            "Điều kiện loại trừ",
-            "Số tiền bảo hiểm & phí bảo hiểm",
-            "Hồ sơ & thủ tục bồi thường",
-            "Thời hạn & hiệu lực hợp đồng",
-            "Định nghĩa & thuật ngữ",
         ],
     },
     "quy_trinh": {
