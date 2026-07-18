@@ -21,7 +21,6 @@ services:
       # bind mount: db + PDF gốc + ảnh page nằm trực tiếp trong ./backend/data trên host
       - ./backend/data:/data
     depends_on:
-      - qdrant
       - retrieval-mcp
     networks:
       - default
@@ -44,9 +43,6 @@ services:
       DATA_DIR: /data
     volumes:
       - ./backend/data:/data
-    depends_on:
-      - qdrant
-
   frontend:
     build: ./frontend
     ports:
