@@ -157,7 +157,7 @@ services:
       --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
       --artifacts-destination s3://${MLFLOW_BUCKET:-mlflow}
       --serve-artifacts
-      --allowed-hosts "localhost,localhost:*,127.0.0.1,127.0.0.1:*,mlflow,mlflow:*,host.docker.internal,host.docker.internal:*"
+      --allowed-hosts "localhost,localhost:*,127.0.0.1,127.0.0.1:*,mlflow,mlflow:*,mlflow.big-rag.dev,mlflow.big-rag.dev:*,host.docker.internal,host.docker.internal:*"
     depends_on:
       postgres:
         condition: service_healthy
