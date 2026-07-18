@@ -1,0 +1,45 @@
+name: Deploy to GCP VM
+
+# Tự động deploy khi source frontend/backend (hoặc compose app) đổi trên master.
+# Chạy trên self-hosted runner đặt NGAY trên VM GCP — không cần SSH secret; job thao
+# tác trực tiếp trên thư mục repo đã provision trên VM.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "docker-compose.yml"
+      - "scripts/deploy.sh"
+      - ".github/workflows/deploy.yml"
+  # Cho phép bấm deploy tay từ tab Actions.
+  workflow_dispatch:
+
+# Không cho 2 lần deploy chồng nhau; huỷ deploy cũ khi có push mới.
+concurrency:
+  group: deploy-master
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    env:
+      # Đường dẫn repo đã clone sẵn trên VM (có .env + thư mục data). Đổi bằng repo
+      # variable DEPLOY_DIR nếu clone chỗ khác. Settings → Secrets and variables →
+      # Actions → Variables → New: DEPLOY_DIR.
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/meomeocoj/big-flag-advanced-rag' }}
+    steps:
+      - name: Fast-forward thư mục deploy tới commit vừa push
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          set -euo pipefail
+          echo "Deploy dir: $DEPLOY_DIR @ ${GITHUB_SHA}"
+          git fetch origin "${GITHUB_REF_NAME}"
+          git reset --hard "${GITHUB_SHA}"
+
+      - name: Deploy (rebuild service đã đổi + restart + health check)
+        working-directory: ${{ env.DEPLOY_DIR }}
+        env:
+          DEPLOY_BEFORE: ${{ github.event.before }}
+          DEPLOY_AFTER: ${{ github.sha }}
+        run: bash scripts/deploy.sh
