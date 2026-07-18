@@ -95,7 +95,7 @@ async def _run_raw(
         async for delta in llm_client.chat_stream_async(
             qa_service.build_messages(req.question, citations),
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=4096,
             tag="showcase_raw",
         ):
             if first_token_ms is None:
@@ -205,7 +205,7 @@ async def _run_advanced(
                 result.graph_facts,
             ),
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=4096,
             tag="showcase_advanced",
         ):
             if first_token_ms is None:

@@ -250,7 +250,7 @@ async def _stream_query(db: Session, req: QueryRequest, request: Request):
                 token_count = 0
                 async for delta in llm_client.chat_stream_async(
                     _build_messages(req.question, citations, catalogs, coverage, graph_facts),
-                    temperature=0.2, max_tokens=1024, tag="qa_stream",
+                    temperature=0.2, max_tokens=4096, tag="qa_stream",
                 ):
                     if await request.is_disconnected():
                         return
@@ -380,7 +380,7 @@ async def _stream_mcp_retrieve(db: Session, req: McpRetrieveRequest, request: Re
             _build_messages(
                 req.question, result.citations, catalogs, result.subgoals, result.graph_facts
             ),
-            temperature=0.2, max_tokens=1024, tag="mcp_playground_stream",
+            temperature=0.2, max_tokens=4096, tag="mcp_playground_stream",
         ):
             if await request.is_disconnected():
                 return

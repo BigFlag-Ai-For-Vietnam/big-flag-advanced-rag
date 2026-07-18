@@ -134,5 +134,5 @@ def answer(question: str, top_k: int) -> tuple[str, list[Citation]]:
     """Trả về (câu trả lời non-stream, citations) — cùng tham số mặc định với playground."""
     citations = retrieve(question, top_k)
     messages = build_messages(question, citations)
-    text = llm_client.chat(messages, temperature=0.2, max_tokens=1024, tag="qa")
+    text = llm_client.chat(messages, temperature=0.2, max_tokens=4096, tag="qa")
     return text, citations
