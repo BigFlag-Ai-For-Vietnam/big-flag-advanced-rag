@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
 from app.routers import catalog, documents, playground
+from app.routers import eval as eval_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -22,6 +23,7 @@ app.add_middleware(
 app.include_router(documents.router)
 app.include_router(playground.router)
 app.include_router(catalog.router)
+app.include_router(eval_router.router)
 
 
 @app.on_event("startup")

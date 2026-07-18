@@ -1,5 +1,6 @@
 # Khôi phục collection Qdrant "rag_chunks" từ snapshot đã commit trong repo.
-# Dùng sau khi clone/pull + `docker compose up -d` (Qdrant khởi động rỗng, named volume).
+# Dùng sau khi clone/pull + up stack infra (`make infra-up-d` hoặc `cd infra && docker compose up -d`)
+# — Qdrant nằm trong stack infra/, khởi động rỗng (named volume).
 #
 #   powershell -ExecutionPolicy Bypass -File scripts/qdrant_restore.ps1
 #

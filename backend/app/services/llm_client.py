@@ -13,7 +13,7 @@ import base64
 import logging
 from typing import Iterator
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from app.config import settings
 
@@ -24,15 +24,27 @@ class LLMError(RuntimeError):
     pass
 
 
-def _client() -> OpenAI:
+def make_openai_client(async_client: bool = False) -> OpenAI | AsyncOpenAI:
+    """Factory public tạo client OpenAI-compatible trỏ FPT (dùng chung cho app + eval).
+
+    Mọi code ngoài llm_client (kể cả backend/eval) KHÔNG tự dựng openai.OpenAI —
+    đây là điểm chặn duy nhất (LLM boundary).
+    """
     if not settings.fpt_api_key:
         raise LLMError("FPT_API_KEY chưa được cấu hình (.env).")
-    return OpenAI(
+    cls = AsyncOpenAI if async_client else OpenAI
+    return cls(
         api_key=settings.fpt_api_key,
         base_url=settings.fpt_base_url,
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
     )
+
+
+def _client() -> OpenAI:
+    client = make_openai_client()  # giữ nguyên hành vi cũ cho chat/vision/embed
+    assert isinstance(client, OpenAI)
+    return client
 
 
 def _log_usage(tag: str, response) -> None:

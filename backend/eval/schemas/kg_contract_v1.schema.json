@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://big-flag-advanced-rag/eval/kg_contract_v1.schema.json",
+  "title": "External KnowledgeGraph contract v1",
+  "description": "Versioned JSON contract for importing an externally-built knowledge graph (entities + relations) into the eval-rag testset generator, e.g. via --kg-file.",
+  "type": "object",
+  "required": ["version", "entities", "relations"],
+  "properties": {
+    "version": { "const": 1 },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "description": { "type": "string" },
+          "chunk_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          }
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "type"],
+        "properties": {
+          "source": { "type": "string", "description": "entity id" },
+          "target": { "type": "string", "description": "entity id" },
+          "type": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    }
+  }
+}
