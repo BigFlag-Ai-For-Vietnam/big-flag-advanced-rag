@@ -14,6 +14,10 @@ on:
       - "infra/**"
       - "scripts/deploy.sh"
       - ".github/workflows/deploy.yml"
+      # Pitch deck tĩnh phục vụ tại big-rag.dev/slide (bind-mount vào nginx). Đổi slide
+      # -> redeploy để git reset cập nhật file; nginx đọc live nên không cần rebuild.
+      - "slides.html"
+      - "demo/**"
   # Cho phép bấm deploy tay từ tab Actions.
   workflow_dispatch:
 
