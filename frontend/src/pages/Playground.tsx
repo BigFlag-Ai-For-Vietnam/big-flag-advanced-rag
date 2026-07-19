@@ -22,9 +22,10 @@ import { upsertProgress } from "../lib/progress";
 import { useSmoothText } from "../lib/useSmoothText";
 
 const SUGGESTIONS = [
-  "Quyền lợi bảo hiểm chính là gì?",
-  "Các trường hợp loại trừ bảo hiểm?",
-  "Trách nhiệm của bên mua bảo hiểm?",
+  "Mật khẩu đăng nhập hệ thống nội bộ tối thiểu bao nhiêu ký tự?",
+  "Phiên làm việc tự động khóa sau bao nhiêu phút?",
+  "Hồ sơ nhận biết khách hàng (KYC) phải lưu trữ bao lâu?",
+  "DDB có được dùng dữ liệu khách hàng để huấn luyện AI không?",
 ];
 
 export default function PlaygroundPage() {
