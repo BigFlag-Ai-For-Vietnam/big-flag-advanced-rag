@@ -41,6 +41,11 @@ services:
       # Basic Auth: file hash .htpasswd để NGOÀI git (secret), tạo tay trên VM (xem
       # nginx/app.conf). Phải tồn tại trước khi nginx up, nếu không Docker tạo thư mục.
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+      # Slide deck tĩnh phục vụ tại big-rag.dev/slide (route ở nginx/app.conf). Bind-mount
+      # trực tiếp từ repo: slides.html -> index.html, thư mục demo/ chứa ảnh trong deck.
+      # Đổi nội dung slide chỉ cần git pull trên VM (không cần recreate nginx).
+      - ../slides.html:/usr/share/nginx/html/slide/index.html:ro
+      - ../demo:/usr/share/nginx/html/slide/demo:ro
     depends_on:
       nginx-certs:
         condition: service_completed_successfully
