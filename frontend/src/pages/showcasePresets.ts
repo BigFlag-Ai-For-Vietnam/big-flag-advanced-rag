@@ -9,6 +9,38 @@ export interface ShowcasePreset {
 
 export const SHOWCASE_PRESETS: ShowcasePreset[] = [
   {
+    id: "demo-1-time-aware",
+    title: "Demo 1 · Time-aware hiệu lực",
+    category: "Hiệu lực theo thời gian",
+    question: "Thời gian khóa phiên làm việc?",
+    painPoint:
+      "Một khái niệm có 5 nguồn với 4 trạng thái hiệu lực khác nhau: bản hiện hành, bản đã bị thay thế, dự thảo chưa hiệu lực và đề xuất trong biên bản họp chưa thành quyết định.",
+    expected:
+      "15 phút với máy trạm trong mạng nội bộ (QĐ342 — hiện hành) và 30 phút với thiết bị làm việc từ xa (QĐ401). Đề xuất nâng lên 20 phút tại họp UB ATTT quý II/2025 chưa thành quyết định nên 15 phút áp dụng nguyên trạng; dự thảo ATTT v3.0 (10 phút) chưa có hiệu lực; QĐ215 (15 phút) đã bị thay thế.",
+  },
+  {
+    id: "demo-2-multi-facet",
+    title: "Demo 2 · Multi-facet",
+    category: "Bao phủ đa khía cạnh",
+    question:
+      "Một nhân viên DDB làm việc từ xa dùng công cụ AI nội bộ để phân tích hồ sơ KYC khách hàng: phiên làm việc từ xa tự động khóa sau bao nhiêu phút; dùng dữ liệu khách hàng huấn luyện AI cần điều kiện gì; hồ sơ KYC lưu trữ bao lâu; rò rỉ dữ liệu cá nhân phải báo cáo NHNN trong bao lâu; và mức phạt chuyển dữ liệu cá nhân ra nước ngoài trái phép?",
+    painPoint:
+      "5 khía cạnh trải trên 4 mảng nghiệp vụ và hơn 6 văn bản — vượt sức chứa một lần top-k; RAG thường dễ thay đáp án đúng bằng giá trị na ná từ văn bản sai.",
+    expected:
+      "Khóa phiên từ xa 30 phút (QĐ401); huấn luyện AI cần sự đồng ý riêng (QĐ455) hoặc dữ liệu đã ẩn danh, lưu tối đa 24 tháng (QĐ502); hồ sơ KYC lưu 10 năm (QĐ480/TT20 — thay cho 5 năm của QĐ455 vì pháp luật chuyên ngành); báo cáo NHNN sự cố nghiêm trọng trong 04 giờ (TT09, phân biệt với 72 giờ thông báo chủ thể dữ liệu theo NĐ88); phạt 200–300 triệu đồng (NĐ88 Đ14).",
+  },
+  {
+    id: "demo-3-reference-chain",
+    title: "Demo 3 · Chuỗi dẫn chiếu",
+    category: "Truy vết đa văn bản",
+    question:
+      "Hệ thống Core Banking gặp thảm họa phải khôi phục trong bao lâu, và căn cứ nào xác định nó là hệ thống trọng yếu?",
+    painPoint:
+      "Con số nằm ở văn bản đầu chuỗi nhưng vế \"căn cứ\" phải đi qua hai văn bản nữa mới tới danh mục gốc — RAG thường thấy tên văn bản được dẫn chiếu mà không có nội dung để đi tiếp.",
+    expected:
+      "RTO tối đa 02 giờ, RPO 15 phút cho hệ thống trọng yếu (QĐ356). Căn cứ xác định trọng yếu: QĐ173/2023 (tiêu chí phân loại, trỏ danh mục) dẫn về Phụ lục 02 QĐ215/2022 (Core Banking T24 — Cấp độ 4), đối chiếu TT09/2024 (hệ thống Cấp độ 3 trở lên là trọng yếu).",
+  },
+  {
     id: "password-priority",
     title: "Quy tắc ưu tiên",
     category: "Phiên bản & xung đột",
@@ -25,15 +57,6 @@ export const SHOWCASE_PRESETS: ShowcasePreset[] = [
     painPoint: "Văn bản chính đã bị thay thế nhưng một phụ lục của nó vẫn tiếp tục có hiệu lực.",
     expected:
       "Có 4 hệ thống: Core Banking T24 (cấp độ 4), thanh toán liên ngân hàng (cấp độ 4), eKYC (cấp độ 3), và hệ thống thẻ/ATM (cấp độ 3). Phụ lục 02 của QĐ215 vẫn có hiệu lực cho đến khi có danh mục thay thế.",
-  },
-  {
-    id: "session-timeout",
-    title: "Xung đột theo phạm vi",
-    category: "Đối chiếu đa văn bản",
-    question: "Phiên làm việc tự động khóa sau bao nhiêu phút?",
-    painPoint: "Không được chọn một con số duy nhất; phải nhận ra hai phạm vi áp dụng khác nhau.",
-    expected:
-      "15 phút đối với máy trạm trong mạng nội bộ và 30 phút đối với thiết bị làm việc từ xa. Cần nêu cả hai giá trị kèm đúng phạm vi, không tự coi một quy định thay thế quy định còn lại.",
   },
   {
     id: "ai-training",
